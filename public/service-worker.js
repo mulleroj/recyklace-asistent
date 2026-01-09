@@ -1,7 +1,7 @@
 // Service Worker pro Recyklační Asistent
-// Verze 5 - vylepšené mobilní menu
+// Verze 6 - oprava deploymenu (odstranění neexistujícího index.css)
 
-const CACHE_NAME = 'recyklace-asistent-v5';
+const CACHE_NAME = 'recyklace-asistent-v6';
 
 // Výchozí preference pro notifikace
 const DEFAULT_PREFS = {
