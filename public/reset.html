@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="cs">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Worker Reset</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 space-y-4">
+        <h1 class="text-2xl font-bold text-emerald-400">🔧 Service Worker Reset</h1>
+
+        <div id="status" class="bg-slate-700 rounded-lg p-4 text-sm font-mono space-y-2">
+            <div>⏳ Čekám na akci...</div>
+        </div>
+
+        <button id="resetBtn"
+            class="w-full py-4 bg-gradient-to-r from-red-500 to-orange-600 text-white rounded-xl font-bold text-lg active:scale-95 transition-all shadow-lg">
+            🗑️ Vymazat vše a restartovat
+        </button>
+
+        <button id="checkBtn"
+            class="w-full py-3 bg-slate-700 text-white rounded-xl font-bold active:scale-95 transition-all">
+            🔍 Zkontrolovat stav
+        </button>
+
+        <a href="/"
+            class="block w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-center active:scale-95 transition-all">
+            ← Zpět do aplikace
+        </a>
+    </div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+
+        function log(message, isError = false) {
+            const color = isError ? 'text-red-400' : 'text-emerald-400';
+            statusDiv.innerHTML += `<div class="${color}">${message}</div>`;
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+        }
+
+        function clearStatus() {
+            statusDiv.innerHTML = '';
+        }
+
+        async function checkStatus() {
+            clearStatus();
+            log('🔍 Kontroluji Service Worker...');
+
+            if (!('serviceWorker' in navigator)) {
+                log('❌ Service Worker není podporován', true);
+                return;
+            }
+
+            try {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                log(`📋 Nalezeno registrací: ${registrations.length}`);
+
+                registrations.forEach((reg, i) => {
+                    log(`\n📌 Registrace #${i + 1}:`);
+                    log(`  Scope: ${reg.scope}`);
+                    log(`  Active: ${reg.active ? '✅ Ano' : '❌ Ne'}`);
+                    log(`  Waiting: ${reg.waiting ? '⏸️ Ano' : '❌ Ne'}`);
+                    log(`  Installing: ${reg.installing ? '⏳ Ano' : '❌ Ne'}`);
+                });
+
+                // Check caches
+                const cacheNames = await caches.keys();
+                log(`\n💾 Nalezeno cachí: ${cacheNames.length}`);
+                cacheNames.forEach(name => log(`  - ${name}`));
+
+            } catch (error) {
+                log(`❌ Chyba: ${error.message}`, true);
+            }
+        }
+
+        async function resetAll() {
+            clearStatus();
+            log('🗑️ Začínám mazání...\n');
+
+            if (!('serviceWorker' in navigator)) {
+                log('❌ Service Worker není podporován', true);
+                return;
+            }
+
+            try {
+                // Unregister all service workers
+                log('1️⃣ Mazání Service Worker registrací...');
+                const registrations = await navigator.serviceWorker.getRegistrations();
+
+                if (registrations.length === 0) {
+                    log('  ℹ️ Žádné registrace nenalezeny');
+                } else {
+                    for (const reg of registrations) {
+                        await reg.unregister();
+                        log(`  ✅ Odregistrováno: ${reg.scope}`);
+                    }
+                }
+
+                // Clear all caches
+                log('\n2️⃣ Mazání cache...');
+                const cacheNames = await caches.keys();
+
+                if (cacheNames.length === 0) {
+                    log('  ℹ️ Žádná cache nenalezena');
+                } else {
+                    for (const name of cacheNames) {
+                        await caches.delete(name);
+                        log(`  ✅ Vymazána: ${name}`);
+                    }
+                }
+
+                // Clear localStorage
+                log('\n3️⃣ Mazání localStorage...');
+                const itemCount = localStorage.length;
+                localStorage.clear();
+                log(`  ✅ Vymazáno ${itemCount} položek`);
+
+                log('\n✅ HOTOVO! Vše vymazáno.');
+                log('\n⚠️ DŮLEŽITÉ: Nyní:');
+                log('1. Zavřete všechny taby s touto aplikací');
+                log('2. Počkejte 2-3 sekundy');
+                log('3. Otevřete aplikaci znovu');
+
+                setTimeout(() => {
+                    log('\n🔄 Za 3 sekundy vás přesměruji...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
+                }, 2000);
+
+            } catch (error) {
+                log(`\n❌ Chyba: ${error.message}`, true);
+            }
+        }
+
+        document.getElementById('checkBtn').addEventListener('click', checkStatus);
+        document.getElementById('resetBtn').addEventListener('click', resetAll);
+
+        // Auto-check on load
+        checkStatus();
+    </script>
+</body>
+
+</html>

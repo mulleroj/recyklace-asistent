@@ -1,0 +1,9 @@
+
+{
+  "name": "Recyklační Asistent",
+  "description": "Specializovaný AI agent pro rychlé a efektivní třídění domácího odpadu podle českých standardů.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
