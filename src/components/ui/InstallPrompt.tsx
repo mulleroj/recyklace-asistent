@@ -60,17 +60,30 @@ const InstallPrompt: React.FC = () => {
     }, []);
 
     const handleInstall = async () => {
+        // First check if already installed
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            alert('✅ Aplikace je již nainstalovaná!\n\nNajdete ji na ploše vašeho zařízení.');
+            setIsVisible(false);
+            return;
+        }
+
         // If we have the native prompt (Android/Chrome/Edge), use it
         if (deferredPrompt) {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
+            try {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
 
-            if (outcome === 'accepted') {
-                setIsInstalled(true);
+                if (outcome === 'accepted') {
+                    setIsInstalled(true);
+                    alert('✅ Aplikace byla úspěšně nainstalována!');
+                }
+
+                setDeferredPrompt(null);
+                setIsVisible(false);
+            } catch (error) {
+                console.error('Install prompt error:', error);
+                setShowIOSInstructions(true);
             }
-
-            setDeferredPrompt(null);
-            setIsVisible(false);
             return;
         }
 
@@ -96,6 +109,11 @@ const InstallPrompt: React.FC = () => {
                     <div className="text-center mb-6">
                         <span className="text-5xl">📲</span>
                         <h3 className="text-xl font-black text-slate-800 mt-4">Jak nainstalovat aplikaci</h3>
+                        <p className="text-sm text-slate-600 mt-2">
+                            {isIOS
+                                ? 'Na iOS zařízení použijte tlačítko "Sdílet"'
+                                : 'V prohlížeči použijte jeho menu pro instalaci'}
+                        </p>
                     </div>
 
                     {isIOS ? (
