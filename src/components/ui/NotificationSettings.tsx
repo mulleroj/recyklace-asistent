@@ -133,12 +133,17 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
             addLog('✅ Service Worker připraven');
             addLog('📤 Odesílám notifikaci...');
 
+            // Use same icons as production (CDN with fallback)
+            const NOTIFICATION_ICON = 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png';
+            const iconUrl = navigator.onLine ? NOTIFICATION_ICON : '/icon-512.png';
+
             await registration.showNotification('🚛 Testovací upozornění', {
-                body: 'Takhle bude vypadat upozornění na svoz odpadu!',
-                icon: '/icon-512.png',
-                badge: '/icon-512.png',
+                body: '📅 Tento formát uvidíte před svozem\n🗑️ Připravte popelnice',
+                icon: iconUrl,
+                badge: iconUrl,
                 tag: 'test-notification',
                 requireInteraction: false,
+                vibrate: [200, 100, 200, 100, 200],
                 silent: false
             });
 

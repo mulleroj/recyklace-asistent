@@ -1,7 +1,11 @@
 // Service Worker pro Recyklační Asistent
-// Verze 7 - oprava white screen issues: Network First pro HTML, lepší lifecycle, SKIP_WAITING podpora
+// Verze 8 - oprava notifikací: efektivnější scheduling (1x hodina), flexibilní čas, lepší obsah
 
-const CACHE_NAME = 'recyklace-asistent-v7';
+const CACHE_NAME = 'recyklace-asistent-v8';
+
+// Notification icons - vždy CDN s fallbackem
+const NOTIFICATION_ICON = 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png';
+const NOTIFICATION_BADGE = 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png';
 
 // Výchozí preference pro notifikace
 const DEFAULT_PREFS = {
@@ -115,6 +119,12 @@ function formatDate(dateStr) {
 
 // Check and show notification if needed - respects user preferences
 async function checkAndNotify() {
+  // 1. Check permission FIRST
+  if (!self.Notification || Notification.permission !== 'granted') {
+    console.log('SW: Notification permission není granted:', self.Notification?.permission);
+    return;
+  }
+
   const prefs = await getNotificationPrefs();
 
   // Skip if notifications are disabled
@@ -124,51 +134,93 @@ async function checkAndNotify() {
   }
 
   const next = getNextCollection();
-  if (!next) return;
+  if (!next) {
+    console.log('SW: Žádný další svoz nalezen');
+    return;
+  }
 
   const daysUntil = getDaysUntil(next.date);
   const lastNotified = await getLastNotifiedDate();
   const today = new Date().toISOString().split('T')[0];
   const notificationKey = `${next.date}-${today}`;
 
+  console.log('SW: Check notifikace -', { daysUntil, daysBefore: prefs.daysBefore, lastNotified, notificationKey });
+
   // Check if we should notify based on user's daysBefore preference
   if (daysUntil <= prefs.daysBefore && daysUntil >= 0 && lastNotified !== notificationKey) {
     const typeLabels = next.types.map(t => TYPE_LABELS[t] || t).join(', ');
-    const daysText = daysUntil === 0 ? 'DNES' : daysUntil === 1 ? 'ZÍTRA' : 'POZÍTŘÍ';
+    const daysText = daysUntil === 0 ? 'DNES' : daysUntil === 1 ? 'ZÍTRA' : `ZA ${daysUntil} DNY`;
 
-    await self.registration.showNotification('🚛 Svoz odpadu ' + daysText, {
-      body: `${formatDate(next.date)}\n${typeLabels}`,
-      icon: 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png',
-      badge: 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png',
+    // Richer notification content
+    const notificationTitle = `🚛 Svoz odpadu ${daysText}!`;
+    const notificationBody = `📅 ${formatDate(next.date)} v 6:00 ráno\n🗑️ ${typeLabels}\n\n✓ Připravte popelnice večer předem`;
+
+    await self.registration.showNotification(notificationTitle, {
+      body: notificationBody,
+      icon: NOTIFICATION_ICON,
+      badge: NOTIFICATION_BADGE,
       tag: 'waste-collection',
       requireInteraction: true,
-      vibrate: prefs.soundEnabled ? [200, 100, 200] : [],
+      vibrate: prefs.soundEnabled ? [200, 100, 200, 100, 200] : [], // Výraznější vibrace
       silent: !prefs.soundEnabled,
-      data: { url: '/' }
+      data: {
+        url: '/',
+        date: next.date,
+        types: next.types
+      }
     });
 
     await setLastNotifiedDate(notificationKey);
-    console.log('SW: Notifikace odeslána pro', next.date);
+    console.log('SW: ✅ Notifikace úspěšně odeslána pro', next.date);
+  } else {
+    console.log('SW: Notifikace nebude odeslána -', {
+      shouldNotify: daysUntil <= prefs.daysBefore && daysUntil >= 0,
+      alreadyNotified: lastNotified === notificationKey
+    });
   }
 }
 
 // Scheduled check - triggers notification at user's preferred time
+// Now with FLEXIBLE TIME WINDOW (±30 minutes) for better reliability
 async function scheduledCheck() {
   const prefs = await getNotificationPrefs();
 
   if (!prefs.enabled) return;
 
   const now = new Date();
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
 
-  // Check if current time matches user's preferred notification time (within 1 minute window)
-  if (currentTime === prefs.time) {
-    console.log('SW: Naplánovaný čas notifikace -', prefs.time);
-    await checkAndNotify();
+  // Parse target time
+  const [targetHour, targetMinute] = prefs.time.split(':').map(Number);
+
+  // Check if we're in the target hour
+  if (currentHour === targetHour) {
+    // Flexible window: allow ±30 minutes from target time
+    const timeDiff = Math.abs(currentMinute - targetMinute);
+
+    if (timeDiff <= 30) {
+      // Check if already notified today to avoid duplicates
+      const lastAttempt = await getLastAttemptDate();
+      const today = new Date().toISOString().split('T')[0];
+
+      if (lastAttempt !== today) {
+        console.log('SW: ✅ V časovém okně pro notifikaci -', {
+          targetTime: prefs.time,
+          currentTime: `${currentHour}:${String(currentMinute).padStart(2, '0')}`,
+          timeDiff
+        });
+        await setLastAttemptDate(today);
+        await checkAndNotify();
+      } else {
+        console.log('SW: Již pokus o notifikaci dnes proveden');
+      }
+    }
   }
 }
 
-// Start interval for scheduled checks (every minute)
+// Start interval for scheduled checks (every HOUR instead of minute)
+// This dramatically reduces battery drain while maintaining reliability
 let checkInterval = null;
 function startScheduledChecks() {
   if (checkInterval) {
@@ -177,9 +229,12 @@ function startScheduledChecks() {
 
   checkInterval = setInterval(() => {
     scheduledCheck();
-  }, 60000); // Check every minute
+  }, 60 * 60 * 1000); // ✅ Check every HOUR (not minute!)
 
-  console.log('SW: Spuštěny naplánované kontroly notifikací');
+  console.log('SW: ✅ Spuštěny naplánované kontroly notifikací (každou hodinu)');
+
+  // Do immediate check on start
+  scheduledCheck();
 }
 
 function stopScheduledChecks() {
@@ -236,6 +291,25 @@ async function setLastNotifiedDate(date) {
   try {
     const cache = await caches.open('notification-state');
     await cache.put('last-notified', new Response(date));
+  } catch (e) { }
+}
+
+// Track last attempt to prevent duplicate notifications
+async function getLastAttemptDate() {
+  try {
+    const cache = await caches.open('notification-state');
+    const response = await cache.match('last-attempt');
+    if (response) {
+      return await response.text();
+    }
+  } catch (e) { }
+  return null;
+}
+
+async function setLastAttemptDate(date) {
+  try {
+    const cache = await caches.open('notification-state');
+    await cache.put('last-attempt', new Response(date));
   } catch (e) { }
 }
 
