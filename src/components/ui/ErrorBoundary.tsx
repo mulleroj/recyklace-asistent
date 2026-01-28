@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 
 interface Props {
     children: ReactNode;
@@ -10,7 +10,7 @@ interface State {
     errorInfo: ErrorInfo | null;
 }
 
-export default class ErrorBoundary extends Component<Props, State> {
+export default class ErrorBoundary extends React.Component<Props, State> {
     public state: State = {
         hasError: false,
         error: null,
@@ -52,31 +52,49 @@ export default class ErrorBoundary extends Component<Props, State> {
         window.location.href = '/';
     };
 
+
     private handleClearData = async (): Promise<void> => {
         if (confirm('Vymazat všechna data a restartovat aplikaci?')) {
             try {
+                console.log('🗑️ Zahajuji kompletní reset...');
+
                 // Clear localStorage
                 localStorage.clear();
+                console.log('✅ LocalStorage vymazán');
 
                 // Clear service worker cache
                 if ('caches' in window) {
                     const cacheNames = await caches.keys();
                     await Promise.all(cacheNames.map(name => caches.delete(name)));
+                    console.log('✅ Cache vymazána:', cacheNames);
                 }
 
                 // Unregister service workers
                 if ('serviceWorker' in navigator) {
                     const registrations = await navigator.serviceWorker.getRegistrations();
                     await Promise.all(registrations.map(reg => reg.unregister()));
+                    console.log('✅ Service Worker odregistrován');
+
+                    // Wait for SW to fully unregister
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
 
-                window.location.href = '/';
+                console.log('✅ Reset dokončen, provádím hard reload...');
+
+                // Force hard reload (bypasses cache completely)
+                window.location.replace('/');
+                // Fallback: if replace doesn't work, force reload
+                setTimeout(() => {
+                    window.location.reload();
+                }, 100);
+
             } catch (e) {
                 console.error('Failed to clear data', e);
-                alert('Chyba při mazání dat. Zkuste přejít na /reset.html');
+                alert('Chyba při mazání dat. Zkuste přejít na /reset.html nebo použít reset v nastavení telefonu.');
             }
         }
     };
+
 
     public render(): ReactNode {
         if (this.state.hasError) {
