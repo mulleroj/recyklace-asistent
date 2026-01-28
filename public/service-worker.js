@@ -1,7 +1,7 @@
 // Service Worker pro Recyklační Asistent
-// Verze 6 - oprava deploymenu (odstranění neexistujícího index.css)
+// Verze 7 - oprava white screen issues: Network First pro HTML, lepší lifecycle, SKIP_WAITING podpora
 
-const CACHE_NAME = 'recyklace-asistent-v6';
+const CACHE_NAME = 'recyklace-asistent-v7';
 
 // Výchozí preference pro notifikace
 const DEFAULT_PREFS = {
@@ -171,13 +171,23 @@ async function scheduledCheck() {
 // Start interval for scheduled checks (every minute)
 let checkInterval = null;
 function startScheduledChecks() {
-  if (checkInterval) return; // Already running
+  if (checkInterval) {
+    clearInterval(checkInterval); // Clear any previous interval
+  }
 
   checkInterval = setInterval(() => {
     scheduledCheck();
   }, 60000); // Check every minute
 
   console.log('SW: Spuštěny naplánované kontroly notifikací');
+}
+
+function stopScheduledChecks() {
+  if (checkInterval) {
+    clearInterval(checkInterval);
+    checkInterval = null;
+    console.log('SW: Zastaveny naplánované kontroly');
+  }
 }
 
 // Preference storage functions
@@ -242,6 +252,8 @@ self.addEventListener('install', (event) => {
 
 // Activate event
 self.addEventListener('activate', (event) => {
+  console.log('SW: Aktivace nové verze');
+
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
@@ -252,36 +264,66 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    }).then(() => {
+      // Take control immediately
+      return self.clients.claim();
+    }).then(() => {
+      // Restart scheduled checks with new version
+      stopScheduledChecks();
+
+      return getNotificationPrefs().then(prefs => {
+        if (prefs.enabled) {
+          startScheduledChecks();
+          checkAndNotify();
+        }
+      });
     })
   );
-  self.clients.claim();
-
-  // Start scheduled notification checks and do immediate check
-  getNotificationPrefs().then(prefs => {
-    if (prefs.enabled) {
-      startScheduledChecks();
-      checkAndNotify();
-    }
-  });
 });
 
-// Fetch event - Cache First strategy with dynamic external asset caching
+// Fetch event - Network First for HTML, Cache First for assets
 self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Network First for HTML documents (navigation requests)
+  if (request.mode === 'navigate' || request.headers.get('accept').includes('text/html')) {
+    event.respondWith(
+      fetch(request).then((networkResponse) => {
+        // Cache the fresh HTML
+        if (networkResponse.ok) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(request, responseClone);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        // Fallback to cache if offline
+        return caches.match(request).then((cachedResponse) => {
+          return cachedResponse || caches.match('/');
+        });
+      })
+    );
+    return;
+  }
+
+  // Cache First for all other assets (JS, CSS, images, fonts)
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
-      return fetch(event.request).then((networkResponse) => {
+      return fetch(request).then((networkResponse) => {
         // Check if this is an external asset we want to cache
         const shouldCache = EXTERNAL_ASSETS_TO_CACHE_ON_FETCH.some(
-          domain => event.request.url.includes(domain)
-        ) || event.request.url.includes('esm.sh');
+          domain => request.url.includes(domain)
+        ) || request.url.includes('esm.sh');
 
         if (shouldCache && networkResponse.ok) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
+            cache.put(request, responseClone);
           });
         }
         return networkResponse;
@@ -290,7 +332,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Message event - for manual notification check and preference updates
+// Message event - for manual notification check, preference updates, and SKIP_WAITING
 self.addEventListener('message', (event) => {
   if (event.data) {
     switch (event.data.type) {
@@ -299,6 +341,10 @@ self.addEventListener('message', (event) => {
         break;
       case 'UPDATE_NOTIFICATION_PREFS':
         saveNotificationPrefs(event.data.prefs);
+        break;
+      case 'SKIP_WAITING':
+        console.log('SW: SKIP_WAITING received, activating new version');
+        self.skipWaiting();
         break;
     }
   }

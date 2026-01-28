@@ -32,6 +32,7 @@ import HelpModal from './src/components/ui/HelpModal';
 import RecyclingTips from './src/components/ui/RecyclingTips';
 import LoadingSpinner from './src/components/ui/LoadingSpinner';
 import InstallPrompt from './src/components/ui/InstallPrompt';
+import UpdatePrompt from './src/components/ui/UpdatePrompt';
 import CalendarModal from './src/components/schedule/CalendarModal';
 import SuggestionList from './src/components/waste/SuggestionList';
 import FeedbackButtons from './src/components/waste/FeedbackButtons';
@@ -68,6 +69,10 @@ const App: React.FC = () => {
     }
     return false;
   });
+
+  // Service Worker update detection
+  const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
+  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   // User-added database items (stored in localStorage)
   const [userDatabase, setUserDatabase] = useState<Array<{ name: string; category: string; note: string }>>(() => {
@@ -178,6 +183,41 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
   }, [history]);
+
+  // Service Worker update detection
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        // Check for updates every 5 minutes
+        setInterval(() => {
+          registration.update().catch(err => {
+            console.warn('Failed to check for SW update:', err);
+          });
+        }, 5 * 60 * 1000);
+
+        // Listen for new service worker waiting
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (!newWorker) return;
+
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New version available
+              console.log('🎉 New version available!');
+              setWaitingWorker(newWorker);
+              setShowUpdatePrompt(true);
+            }
+          });
+        });
+      });
+
+      // Listen for controller change (when skipWaiting is called)
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        console.log('🔄 New SW activated, reloading...');
+        window.location.reload();
+      });
+    }
+  }, []);
 
   // Smart prefetching - warm up cache with popular queries
   useEffect(() => {
@@ -580,6 +620,17 @@ const App: React.FC = () => {
         isOpen={isAnalyticsDashboardOpen}
         onClose={() => setIsAnalyticsDashboardOpen(false)}
       />
+
+      {showUpdatePrompt && (
+        <UpdatePrompt
+          onUpdate={() => {
+            if (waitingWorker) {
+              waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            }
+          }}
+          onDismiss={() => setShowUpdatePrompt(false)}
+        />
+      )}
     </div>
   );
 };
