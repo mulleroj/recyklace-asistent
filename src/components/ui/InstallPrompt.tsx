@@ -14,16 +14,24 @@ const InstallPrompt: React.FC = () => {
     const [showIOSInstructions, setShowIOSInstructions] = useState(false);
 
     useEffect(() => {
+        // Listen for manual show event from header button
+        const handleManualShow = () => {
+            setIsVisible(true);
+            localStorage.removeItem('install_prompt_dismissed');
+        };
+
+        window.addEventListener('show-install-prompt', handleManualShow);
+
         // Check if already dismissed
         const dismissed = localStorage.getItem('install_prompt_dismissed');
         if (dismissed) {
-            return;
+            return () => window.removeEventListener('show-install-prompt', handleManualShow);
         }
 
         // Check if already installed
         if (window.matchMedia('(display-mode: standalone)').matches) {
             setIsInstalled(true);
-            return;
+            return () => window.removeEventListener('show-install-prompt', handleManualShow);
         }
 
         // Check if iOS
@@ -46,6 +54,7 @@ const InstallPrompt: React.FC = () => {
 
         return () => {
             window.removeEventListener('beforeinstallprompt', handler);
+            window.removeEventListener('show-install-prompt', handleManualShow);
             clearTimeout(timer);
         };
     }, []);

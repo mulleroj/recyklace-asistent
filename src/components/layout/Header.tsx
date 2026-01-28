@@ -186,6 +186,17 @@ const Header: React.FC<HeaderProps> = ({ isOnline, soundEnabled, onToggleSound, 
                                         </button>
                                         <button
                                             onClick={() => {
+                                                // Dispatch custom event to show install prompt
+                                                window.dispatchEvent(new Event('show-install-prompt'));
+                                                setIsMenuOpen(false);
+                                            }}
+                                            className="w-full px-4 py-3 text-left hover:bg-emerald-50 transition-colors flex items-center gap-3 border-b border-slate-100"
+                                        >
+                                            <span className="text-xl">📲</span>
+                                            <span className="font-bold text-slate-700">Stáhnout aplikaci</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
                                                 onOpenHelp();
                                                 setIsMenuOpen(false);
                                             }}
