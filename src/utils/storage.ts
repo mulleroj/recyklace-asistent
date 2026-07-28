@@ -8,6 +8,7 @@ export const LEGACY_AI_STORAGE_KEYS = [
   'recyklacni_asistent_api_key_gemini',
   'recyklacni_asistent_api_key_openai',
   'recyklacni_asistent_ai_provider',
+  'recyklacni_asistent_ai_cache',
 ];
 
 export interface UserWasteItem {
@@ -15,12 +16,12 @@ export interface UserWasteItem {
   name: string;
   category: WasteCategory;
   note: string;
-  source?: 'manual' | 'ai';
+  source?: 'manual';
   createdAt: number;
 }
 
 export function normalizeQuery(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
+  return value.replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ');
 }
 
 export function clearLegacyAiKeys(storage: Storage = localStorage): void {
@@ -80,7 +81,7 @@ export function parseUserDatabase(raw: string | null): UserWasteItem[] {
           name: normalizeQuery(String(candidate.name)),
           category: candidate.category as WasteCategory,
           note: typeof candidate.note === 'string' ? normalizeQuery(candidate.note).slice(0, 400) : '',
-          source: candidate.source === 'ai' ? 'ai' : 'manual',
+          source: 'manual',
           createdAt,
         };
       }))

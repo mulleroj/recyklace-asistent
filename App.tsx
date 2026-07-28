@@ -4,10 +4,7 @@ import { WasteCategory, WasteItem, ChatHistoryItem } from './types';
 import CategoryBadge from './components/CategoryBadge';
 import { WASTE_DATABASE } from './constants';
 import { findLocalMatch, findSuggestions, normalizeForSearch } from './utils/fuzzySearch';
-import { getAICache } from './utils/aiCache';
 import { getAnalytics, AnalyticsEvent } from './utils/analytics';
-import { retryApiCall } from './utils/retryLogic';
-import { identifyWasteViaProxy } from './src/services/aiProxyClient';
 import {
   clearLegacyAiKeys,
   dedupeUserItems,
@@ -20,7 +17,6 @@ import {
 
 // Hooks
 import { useSpeech } from './src/hooks/useSpeech';
-import { useCamera } from './src/hooks/useCamera';
 import { useAnnounce } from './src/hooks/useAnnounce';
 
 // Components
@@ -28,7 +24,6 @@ import Header from './src/components/layout/Header';
 import SearchBox from './src/components/ui/SearchBox';
 import TipSection from './src/components/ui/TipSection';
 import ResultCard from './src/components/waste/ResultCard';
-import CameraView from './src/components/waste/CameraView';
 import RecyclingGuide from './src/components/waste/RecyclingGuide';
 import AddWasteModal from './src/components/waste/AddWasteModal';
 import CollectionAlert from './src/components/schedule/CollectionAlert';
@@ -49,7 +44,7 @@ const NOTIFICATION_PROMPT_KEY = 'recyklacni_asistent_notification_prompt_shown';
 
 const App: React.FC = () => {
   const [query, setQuery] = useState('');
-  const [result, setResult] = useState<(WasteItem & { source?: 'local' | 'ai' | 'user' }) | null>(null);
+  const [result, setResult] = useState<(WasteItem & { source?: 'local' | 'user' }) | null>(null);
   const [loading, setLoading] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -59,9 +54,8 @@ const App: React.FC = () => {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ name: string; category: string; note?: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [pendingQuery, setPendingQuery] = useState<{ text?: string; image?: { data: string; mimeType: string } } | null>(null);
+  const [notFoundQuery, setNotFoundQuery] = useState<string | null>(null);
   const [isAnalyticsDashboardOpen, setIsAnalyticsDashboardOpen] = useState(false);
-  const requestRef = useRef<{ id: number; controller?: AbortController }>({ id: 0 });
   const modalTriggerRef = useRef<HTMLElement | null>(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(() => {
     // Show prompt if not shown before and notifications not yet enabled
@@ -104,6 +98,10 @@ const App: React.FC = () => {
     });
   };
 
+  const handleDeleteUserItem = (id: string) => {
+    setUserDatabase(prev => prev.filter(item => item.id !== id));
+  };
+
   const { announceResult } = useAnnounce(soundEnabled);
 
   const rememberModalTrigger = () => {
@@ -116,8 +114,9 @@ const App: React.FC = () => {
     window.setTimeout(() => trigger?.focus(), 0);
   };
 
-  const handleIdentifyResult = (res: WasteItem & { source?: 'local' | 'ai' | 'user' }, transcript?: string) => {
+  const handleIdentifyResult = (res: WasteItem & { source?: 'local' | 'user' }, transcript?: string) => {
     setResult(res);
+    setNotFoundQuery(null);
     announceResult(res.category);
     setHistory(prev => [{
       query: transcript || res.name,
@@ -131,11 +130,6 @@ const App: React.FC = () => {
     const analytics = getAnalytics();
     if (res.source === 'local') {
       analytics.track(AnalyticsEvent.SEARCH_LOCAL_HIT, { query: transcript || res.name });
-    } else if (res.source === 'ai') {
-      const isFromCache = (res as any).id?.startsWith('cache-');
-      if (isFromCache) {
-        analytics.track(AnalyticsEvent.SEARCH_CACHE_HIT, { query: transcript || res.name });
-      }
     } else if (res.source === 'user') {
       analytics.track(AnalyticsEvent.SEARCH_LOCAL_HIT, { query: transcript || res.name, userAdded: true });
     }
@@ -145,18 +139,8 @@ const App: React.FC = () => {
 
   const { isListening, error: speechError, startListening } = useSpeech((transcript) => {
     setQuery(transcript);
-    handleIdentify({ text: transcript });
+    handleIdentify(transcript);
   });
-
-  const {
-    isCameraOpen,
-    videoRef,
-    canvasRef,
-    error: cameraError,
-    startCamera,
-    stopCamera,
-    capturePhoto
-  } = useCamera();
 
   const [history, setHistory] = useState<ChatHistoryItem[]>(() => parseHistory(localStorage.getItem(STORAGE_KEY)));
 
@@ -194,138 +178,68 @@ const App: React.FC = () => {
     return () => window.removeEventListener('sw-update-available', handleUpdate);
   }, []);
 
-  const handleIdentify = async ({ text, image, skipCache = false, skipSuggestions = false }: {
-    text?: string;
-    image?: { data: string; mimeType: string };
-    skipCache?: boolean;
-    skipSuggestions?: boolean;
-  }) => {
-    const normalizedText = text ? normalizeQuery(text) : undefined;
-    if (!normalizedText && !image) {
+  const handleIdentify = (text: string) => {
+    const normalizedText = normalizeQuery(text);
+    if (!normalizedText) {
       setError('Zadejte nazev odpadu.');
       return;
     }
 
-    requestRef.current.controller?.abort();
-    const controller = new AbortController();
-    const requestId = requestRef.current.id + 1;
-    requestRef.current = { id: requestId, controller };
-
     setLoading(true);
     setError(null);
     setResult(null);
+    setNotFoundQuery(null);
+    setShowSuggestions(false);
 
-    try {
-      const aiCache = getAICache();
-
-      // 1. Lokální databáze (včetně uživatelské)
-      if (normalizedText) {
-        const localMatch = findLocalMatch(normalizedText, fullDatabase);
-        if (localMatch) {
-          const isUserItem = userDatabase.some(item => item.name === localMatch.name);
-          handleIdentifyResult({
-            id: `local-${Date.now()}`,
-            ...localMatch,
-            isFromDatabase: true,
-            source: isUserItem ? 'user' : 'local'
-          }, normalizedText);
-          return;
-        }
-      }
-
-      // 2. Check AI cache
-      if (!skipCache) {
-        if (normalizedText) {
-          const cachedResult = aiCache.findByQuery(normalizedText);
-          if (cachedResult) {
-            handleIdentifyResult({
-              id: `cache-${Date.now()}`,
-              ...cachedResult,
-              isFromDatabase: false,
-              source: 'ai'
-            }, normalizedText);
-            return;
-          }
-        } else if (image) {
-          const cachedResult = aiCache.findByImage(image.data);
-          if (cachedResult) {
-            handleIdentifyResult({
-              id: `cache-${Date.now()}`,
-              ...cachedResult,
-              isFromDatabase: false,
-              source: 'ai'
-            }, 'Vyfocený odpad');
-            return;
-          }
-        }
-      }
-
-      // 3. Show suggestions before calling AI (only for text queries)
-      if (!skipSuggestions && normalizedText && !image) {
-        const similarItems = findSuggestions(normalizedText, fullDatabase, 3);
-        if (similarItems.length > 0) {
-          setSuggestions(similarItems);
-          setShowSuggestions(true);
-          setPendingQuery({ text: normalizedText, image });
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 4. AI analýza (vyžaduje online)
-      if (!isOnline) {
-        const analytics = getAnalytics();
-        analytics.track(AnalyticsEvent.ERROR_OFFLINE, { hasImage: !!image });
-        setError(image ? 'Focení vyžaduje internet.' : 'Tuto položku nemám v databázi a jste offline.');
-        setLoading(false);
-        return;
-      }
-
-      const analytics = getAnalytics();
-      analytics.track(AnalyticsEvent.SEARCH_AI_CALL, { hasImage: !!image });
-
-      const aiRes = await retryApiCall(
-        () => identifyWasteViaProxy({ query: normalizedText, image }, controller.signal),
-        'AI waste identification'
+    const localMatch = findLocalMatch(normalizedText, fullDatabase);
+    if (localMatch) {
+      const isUserItem = userDatabase.some(
+        item => normalizeForSearch(item.name) === normalizeForSearch(localMatch.name)
       );
-      if (requestRef.current.id !== requestId) return;
-
-      // Uložit do AI cache
-      aiCache.add({
-        name: aiRes.name,
-        category: aiRes.category,
-        note: aiRes.note || '',
-        query: normalizedText,
-        imageData: image?.data,
-      });
-
-      // Automaticky uložit AI výsledek do uživatelské databáze pro budoucí vyhledávání
-      const aiItem: UserWasteItem = {
-        id: `ai-${Date.now()}`,
-        name: aiRes.name,
-        category: aiRes.category,
-        note: `${aiRes.note || ''} (Navrhl AI asistent - lze upravit nebo odstranit.)`,
-        source: 'ai',
-        createdAt: Date.now(),
-      };
-
-      const alreadyExists = userDatabase.some(
-        item => normalizeForSearch(item.name) === normalizeForSearch(aiItem.name)
-      );
-
-      if (!alreadyExists) {
-        setUserDatabase(prev => dedupeUserItems([aiItem, ...prev]).slice(0, 200));
-      }
-
-      handleIdentifyResult({ ...aiRes, source: 'ai' }, normalizedText);
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Nepodarilo se spojit s asistentem.');
-      setLoading(false);
+      handleIdentifyResult({
+        id: `local-${normalizeForSearch(localMatch.name)}`,
+        ...localMatch,
+        isFromDatabase: true,
+        source: isUserItem ? 'user' : 'local'
+      }, normalizedText);
+      return;
     }
+
+    const similarItems = findSuggestions(normalizedText, fullDatabase, 3);
+    if (similarItems.length > 0) {
+      setSuggestions(similarItems);
+      setShowSuggestions(true);
+      setLoading(false);
+      const analytics = getAnalytics();
+      analytics.track(AnalyticsEvent.SEARCH_SUGGESTION_SHOWN, { query: normalizedText });
+      return;
+    }
+
+    const analytics = getAnalytics();
+    analytics.track(AnalyticsEvent.SEARCH_NOT_FOUND, { query: normalizedText });
+    setNotFoundQuery(normalizedText);
+    setLoading(false);
   };
 
-  const displayedError = error || speechError || cameraError;
+  const handleAddMissingItem = () => {
+    setQuery(notFoundQuery || query);
+    setIsAddModalOpen(true);
+  };
+
+  const handleSuggestionCancel = () => {
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setNotFoundQuery(query.trim() ? normalizeQuery(query) : null);
+    setLoading(false);
+
+    const analytics = getAnalytics();
+    analytics.track(AnalyticsEvent.SEARCH_SUGGESTION_REJECTED, {
+      query: query.trim() ? normalizeQuery(query) : undefined,
+      reason: 'user_cancelled',
+    });
+  };
+
+  const displayedError = error || speechError;
 
   return (
     <div className={`min-h-screen transition-all duration-1000 ${isOnline ? 'bg-emerald-50' : 'bg-slate-200'} text-slate-900 pb-20`}>
@@ -342,7 +256,6 @@ const App: React.FC = () => {
           rememberModalTrigger();
           setIsHelpOpen(true);
         }}
-        onOpenApiKey={() => setError('AI asistent pouziva serverovy endpoint. API klic se v aplikaci nezadava.')}
         onOpenCalendar={() => {
           rememberModalTrigger();
           setIsCalendarOpen(true);
@@ -376,15 +289,48 @@ const App: React.FC = () => {
           </button>
         )}
 
+        {userDatabase.length > 0 && !result && !loading && (
+          <section className="mb-6 bg-white rounded-[28px] p-5 shadow-lg border-4 border-purple-100">
+            <h3 className="text-lg font-black uppercase text-purple-700 mb-4">Moje položky</h3>
+            <div className="space-y-3">
+              {userDatabase.slice(0, 5).map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-3 bg-purple-50 rounded-2xl p-3">
+                  <button
+                    onClick={() => handleIdentifyResult({
+                      id: item.id,
+                      name: item.name,
+                      category: item.category,
+                      note: item.note,
+                      isFromDatabase: true,
+                      source: 'user',
+                    }, item.name)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <span className="block font-bold text-slate-800 truncate">{item.name}</span>
+                    <span className="text-xs font-bold text-purple-600 uppercase">Moje položka</span>
+                  </button>
+                  <CategoryBadge category={item.category} variant="minimal" />
+                  <button
+                    onClick={() => handleDeleteUserItem(item.id)}
+                    className="w-9 h-9 rounded-full bg-red-100 text-red-600 font-black"
+                    aria-label={`Odstranit ${item.name} z vlastních položek`}
+                    title="Odstranit"
+                  >
+                    X
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <SearchBox
           query={query}
           setQuery={setQuery}
-          onSearch={() => handleIdentify({ text: query })}
-          onCamera={() => startCamera(isOnline)}
+          onSearch={() => handleIdentify(query)}
           onVoice={startListening}
           isListening={isListening}
           loading={loading}
-          isOnline={isOnline}
           error={displayedError}
         />
 
@@ -392,6 +338,36 @@ const App: React.FC = () => {
 
         {result && !loading && (
           <ResultCard result={result} onClose={() => setResult(null)} />
+        )}
+
+        {notFoundQuery && !result && !loading && !showSuggestions && (
+          <section className="mb-10 bg-white rounded-[32px] p-8 shadow-xl border-4 border-amber-200" role="status">
+            <h2 className="text-2xl font-black text-slate-900 mb-4">Tuto položku zatím v databázi nemám.</h2>
+            <p className="text-slate-600 font-bold mb-3">Zkuste:</p>
+            <ul className="list-disc pl-6 space-y-2 text-slate-600 font-semibold">
+              <li>jiný nebo kratší název,</li>
+              <li>název bez značky výrobku,</li>
+              <li>vybrat některý z podobných návrhů,</li>
+              <li>přidat položku do vlastní databáze.</li>
+            </ul>
+            <div className="grid sm:grid-cols-2 gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setNotFoundQuery(null);
+                  window.setTimeout(() => document.querySelector<HTMLInputElement>('input[type="text"]')?.focus(), 0);
+                }}
+                className="py-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black transition-all"
+              >
+                Upravit hledání
+              </button>
+              <button
+                onClick={handleAddMissingItem}
+                className="py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black transition-all"
+              >
+                Přidat vlastní položku
+              </button>
+            </div>
+          </section>
         )}
 
         {history.length > 0 && !result && !loading && (
@@ -441,16 +417,7 @@ const App: React.FC = () => {
 
         {!result && !loading && <RecyclingGuide />}
 
-        {isCameraOpen && (
-          <CameraView
-            videoRef={videoRef}
-            onCapture={() => capturePhoto((data) => handleIdentify({ image: { data, mimeType: 'image/jpeg' } }))}
-            onClose={stopCamera}
-          />
-        )}
       </main>
-
-      <canvas ref={canvasRef} className="hidden" />
 
       <AddWasteModal
         isOpen={isAddModalOpen}
@@ -480,6 +447,7 @@ const App: React.FC = () => {
           suggestions={suggestions}
           onSelect={(suggestion) => {
             setShowSuggestions(false);
+            setSuggestions([]);
             handleIdentifyResult({
               id: `suggestion-${Date.now()}`,
               name: suggestion.name,
@@ -487,40 +455,16 @@ const App: React.FC = () => {
               note: suggestion.note || '',
               isFromDatabase: true,
               source: 'local'
-            }, pendingQuery?.text || suggestion.name);
-            setPendingQuery(null);
+            }, query.trim() ? normalizeQuery(query) : suggestion.name);
 
             // Track suggestion accepted
             const analytics = getAnalytics();
             analytics.track(AnalyticsEvent.SEARCH_SUGGESTION_ACCEPTED, {
-              query: pendingQuery?.text,
+              query: query.trim() ? normalizeQuery(query) : undefined,
               selectedSuggestion: suggestion.name,
             });
           }}
-          onUseAI={() => {
-            setShowSuggestions(false);
-            if (pendingQuery) {
-              // Track suggestion rejected - user chose AI
-              const analytics = getAnalytics();
-              analytics.track(AnalyticsEvent.SEARCH_SUGGESTION_REJECTED, {
-                query: pendingQuery.text,
-                reason: 'user_chose_ai',
-              });
-              handleIdentify({ ...pendingQuery, skipSuggestions: true });
-            }
-          }}
-          onCancel={() => {
-            setShowSuggestions(false);
-            setPendingQuery(null);
-            setLoading(false);
-
-            // Track suggestion rejected - user cancelled
-            const analytics = getAnalytics();
-            analytics.track(AnalyticsEvent.SEARCH_SUGGESTION_REJECTED, {
-              query: pendingQuery?.text,
-              reason: 'user_cancelled',
-            });
-          }}
+          onCancel={handleSuggestionCancel}
         />
       )}
 

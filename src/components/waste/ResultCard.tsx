@@ -1,7 +1,6 @@
-
 import React from 'react';
 import CategoryBadge from '../../../components/CategoryBadge';
-import { WasteItem } from '../../../types';
+import { WasteCategory, WasteItem } from '../../../types';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import FeedbackButtons from './FeedbackButtons';
 import { getAnalytics, AnalyticsEvent } from '../../../utils/analytics';
@@ -11,7 +10,7 @@ interface ResultCardProps {
     onClose: () => void;
 }
 
-type GarbageResult = WasteItem & { source?: 'local' | 'ai' | 'user' };
+type GarbageResult = WasteItem & { source?: 'local' | 'user' };
 
 const ResultCard: React.FC<ResultCardProps> = ({ result, onClose }) => {
     const { speakText } = useAnnounce(true);
@@ -22,57 +21,33 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onClose }) => {
         }
     };
 
-    const getSourceLabel = () => {
-        switch (result.source) {
-            case 'user': return '👤 Vaše databáze';
-            case 'local': return '📦 V databázi';
-            case 'ai': return '✨ AI + uloženo';
-            default: return '📦 V databázi';
-        }
-    };
+    const sourceLabel = result.source === 'user' ? 'Moje položka' : 'V databázi';
+    const sourceColor = result.source === 'user' ? 'bg-purple-500' : 'bg-emerald-500';
 
-    const getSourceColor = () => {
-        switch (result.source) {
-            case 'user': return 'bg-purple-500';
-            case 'ai': return 'bg-blue-500';
-            default: return 'bg-emerald-500';
-        }
-    };
-
-    const handleFeedback = (positive: boolean, details?: { correctCategory?: any; note?: string }) => {
+    const handleFeedback = (positive: boolean, details?: { correctCategory?: WasteCategory; note?: string }) => {
         const analytics = getAnalytics();
 
-        if (positive) {
-            analytics.track(AnalyticsEvent.USER_FEEDBACK_POSITIVE, {
-                itemName: result.name,
-                category: result.category,
-                source: result.source,
-            });
-        } else {
-            analytics.track(AnalyticsEvent.USER_FEEDBACK_NEGATIVE, {
-                itemName: result.name,
-                category: result.category,
-                source: result.source,
-                correctCategory: details?.correctCategory,
-                userNote: details?.note,
-            });
-        }
+        analytics.track(positive ? AnalyticsEvent.USER_FEEDBACK_POSITIVE : AnalyticsEvent.USER_FEEDBACK_NEGATIVE, {
+            itemName: result.name,
+            category: result.category,
+            source: result.source,
+            correctCategory: details?.correctCategory,
+            userNote: details?.note,
+        });
     };
 
     return (
         <div className="mb-10 bg-white rounded-[50px] p-12 shadow-2xl border-[12px] border-emerald-100 relative overflow-hidden animate-in fade-in zoom-in duration-300">
-            <div className={`absolute top-0 right-0 px-6 py-2 text-[10px] font-black uppercase tracking-widest ${getSourceColor()} text-white`}>
-                {getSourceLabel()}
+            <div className={`absolute top-0 right-0 px-6 py-2 text-[10px] font-black uppercase tracking-widest ${sourceColor} text-white`}>
+                {sourceLabel}
             </div>
 
             <div className="mb-8 text-center">
                 <p className="text-lg font-bold text-slate-400 uppercase tracking-widest mb-4">
-                    {result.source === 'ai' ? 'AI nalezla a uložila do vaší databáze:' :
-                        result.source === 'user' ? 'Položka z vaší databáze:' :
-                            'Položka nalezena v databázi:'}
+                    {result.source === 'user' ? 'Položka z vaší databáze:' : 'Položka nalezena v databázi:'}
                 </p>
                 <h2 className="text-3xl font-black text-slate-900 mb-2 uppercase italic">
-                    **{result.name}** patří do:
+                    {result.name} patří do:
                 </h2>
             </div>
 
@@ -87,7 +62,7 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onClose }) => {
                     aria-label={`Přečíst poznámku: ${result.note}`}
                 >
                     <div className="flex items-center justify-center gap-3">
-                        <span className="text-2xl opacity-50 group-hover:opacity-100 transition-opacity">🔊</span>
+                        <span className="text-2xl opacity-50 group-hover:opacity-100 transition-opacity">Zvuk</span>
                         <p className="text-2xl font-bold text-slate-700 italic text-center">"{result.note}"</p>
                     </div>
                 </div>

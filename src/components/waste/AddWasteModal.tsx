@@ -65,6 +65,8 @@ const normalize = (str: string) =>
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
 
+const cleanInput = (value: string) => value.replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ');
+
 // Heuristické doplnění kategorie na základě klíčových slov
 function suggestCategoryFromKeywords(name: string): { category: WasteCategory; note: string } | null {
     const normalizedName = normalize(name);
@@ -119,8 +121,8 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const normalizedName = name.trim().replace(/\s+/g, ' ');
-        const normalizedNote = note.trim().replace(/\s+/g, ' ');
+        const normalizedName = cleanInput(name);
+        const normalizedNote = cleanInput(note);
         if (normalizedName.length < 2) {
             setFormError('Zadejte nazev odpadu.');
             return;

@@ -6,7 +6,6 @@ interface HeaderProps {
     onToggleSound: () => void;
     onOpenNotificationSettings: () => void;
     onOpenHelp: () => void;
-    onOpenApiKey?: () => void;
     onOpenCalendar: () => void;
     onOpenAnalytics: () => void;
 }

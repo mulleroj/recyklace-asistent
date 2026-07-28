@@ -34,7 +34,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   if (request.method !== 'GET') return;
-  if (url.pathname.startsWith('/.netlify/functions/')) return;
 
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(networkFirst(request));
