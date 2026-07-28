@@ -114,8 +114,8 @@ const App: React.FC = () => {
     window.setTimeout(() => trigger?.focus(), 0);
   };
 
-  const openAddWasteModal = () => {
-    rememberModalTrigger();
+  const openAddWasteModal = (event?: React.MouseEvent<HTMLElement>) => {
+    modalTriggerRef.current = event?.currentTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setIsAddModalOpen(true);
   };
 
@@ -231,9 +231,9 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
-  const handleAddMissingItem = () => {
+  const handleAddMissingItem = (event: React.MouseEvent<HTMLButtonElement>) => {
     setQuery(notFoundQuery || query);
-    openAddWasteModal();
+    openAddWasteModal(event);
   };
 
   const handleSuggestionCancel = () => {
