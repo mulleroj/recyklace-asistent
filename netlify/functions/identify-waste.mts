@@ -254,9 +254,19 @@ function getServerEnv(name: string): string | undefined {
 }
 
 async function createGeminiHttpError(response: Response): Promise<GeminiUpstreamError> {
-  const providerReason = extractProviderReason(await safeReadBody(response));
+  const body = await safeReadBody(response);
+  const providerReason = extractProviderReason(body);
+  const providerMessage = extractProviderMessage(body);
   if (response.status === 401 || response.status === 403) {
     return new GeminiUpstreamError(response.status, providerReason || 'provider_auth_or_config', 'auth-config', 502);
+  }
+  if (response.status === 400 && isAuthConfigReason(`${providerReason} ${providerMessage}`)) {
+    return new GeminiUpstreamError(
+      response.status,
+      providerMessage || providerReason || 'provider_auth_or_config',
+      'auth-config',
+      502,
+    );
   }
   if (response.status === 404) {
     return new GeminiUpstreamError(response.status, providerReason || 'provider_model_not_found', 'model-not-found', 502);
@@ -268,6 +278,10 @@ async function createGeminiHttpError(response: Response): Promise<GeminiUpstream
     return new GeminiUpstreamError(response.status, providerReason || 'provider_5xx', 'provider-unavailable', 502);
   }
   return new GeminiUpstreamError(response.status, providerReason || 'provider_4xx', 'invalid-request', 502);
+}
+
+function isAuthConfigReason(reason: string): boolean {
+  return /api[_-]?key|key[_-]?not[_-]?valid|invalid[_-]?key/i.test(reason);
 }
 
 async function safeReadBody(response: Response): Promise<string> {
@@ -284,6 +298,16 @@ function extractProviderReason(body: string): string {
     const reason = data.error?.status || data.error?.code || data.error?.message;
     if (typeof reason === 'string') return sanitizeReason(reason);
     if (typeof reason === 'number') return `code_${reason}`;
+  } catch {
+    // Provider bodies are untrusted; ignore malformed diagnostics.
+  }
+  return '';
+}
+
+function extractProviderMessage(body: string): string {
+  try {
+    const data = JSON.parse(body) as { error?: { message?: unknown } };
+    if (typeof data.error?.message === 'string') return sanitizeReason(data.error.message);
   } catch {
     // Provider bodies are untrusted; ignore malformed diagnostics.
   }

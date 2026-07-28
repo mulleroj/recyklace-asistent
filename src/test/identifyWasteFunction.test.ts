@@ -205,6 +205,23 @@ describe('identify-waste Netlify Function', () => {
     expect(response.headers.get(aiErrorClassHeader)).toBe('invalid-request');
   });
 
+  it('classifies provider 400 API key failures as auth-config', async () => {
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: { status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' },
+    }, { status: 400 })));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, previewUrl));
+    const data = await response.json();
+    expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('auth-config');
+    expect(JSON.stringify(data)).not.toContain('API key not valid');
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain('test-key');
+  });
+
   it('maps provider 404 for missing models to model-not-found diagnostics', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
