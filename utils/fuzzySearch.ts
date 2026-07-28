@@ -123,11 +123,19 @@ const SYNONYMS: Record<string, string[]> = {
 /**
  * Normalizes a string for comparison (lowercase, trimmed, remove accents/diacritics for better matching).
  */
-const normalize = (str: string) =>
+export const normalizeForSearch = (str: string) =>
   str.toLowerCase()
     .trim()
+    .replace(/\s+/g, " ")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, ""); // Odstranění diakritiky pro robustnější hledání
+
+const normalize = normalizeForSearch;
+
+export interface ScoredMatch<T> {
+  item: T;
+  score: number;
+}
 
 /**
  * Expands the query with synonyms and stemmed variations for better matching.
@@ -427,4 +435,62 @@ export function findLocalMatch<T extends { name: string }>(
 
   // Pokud je nejlepší skóre příliš vysoké, považujeme to za "nenalezeno"
   return bestScore < 3 ? bestMatch : null;
+}
+
+export function scoreLocalMatch<T extends { name: string }>(
+  query: string,
+  item: T,
+  fuzzyThreshold: number = 3
+): ScoredMatch<T> | null {
+  const normalizedQuery = normalize(query);
+  const normalizedName = normalize(item.name);
+
+  if (!normalizedQuery || normalizedQuery.length < 2) return null;
+  if (normalizedName === normalizedQuery) return { item, score: 100 };
+  if (normalizedName.startsWith(normalizedQuery)) {
+    return { item, score: 92 - Math.min(normalizedName.length - normalizedQuery.length, 20) / 10 };
+  }
+  if (normalizedName.includes(normalizedQuery)) return { item, score: 82 };
+  if (normalizedQuery.includes(normalizedName)) return { item, score: 78 };
+
+  const ngram = ngramSimilarity(normalizedQuery, normalizedName);
+  const distance = getLevenshteinDistance(normalizedQuery, normalizedName);
+  const maxLength = Math.max(normalizedQuery.length, normalizedName.length);
+  const similarityRatio = maxLength > 0 ? 1 - distance / maxLength : 0;
+  const adaptiveThreshold = Math.min(
+    fuzzyThreshold,
+    Math.max(1, Math.floor(Math.min(normalizedQuery.length, normalizedName.length) / 3))
+  );
+
+  if (distance <= adaptiveThreshold && similarityRatio >= 0.5) {
+    return { item, score: 65 + similarityRatio * 20 };
+  }
+  if (ngram >= 0.38) {
+    return { item, score: 45 + ngram * 35 };
+  }
+
+  return null;
+}
+
+export function findSuggestions<T extends { name: string }>(
+  query: string,
+  database: T[],
+  limit: number = 3
+): Array<T & { score: number }> {
+  const byName = new Map<string, T & { score: number }>();
+
+  for (const item of database) {
+    const match = scoreLocalMatch(query, item, 5);
+    if (!match) continue;
+
+    const key = normalize(item.name);
+    const current = byName.get(key);
+    if (!current || match.score > current.score) {
+      byName.set(key, { ...item, score: Math.round(match.score * 1000) / 1000 });
+    }
+  }
+
+  return Array.from(byName.values())
+    .sort((a, b) => b.score - a.score || normalize(a.name).localeCompare(normalize(b.name), 'cs'))
+    .slice(0, limit);
 }

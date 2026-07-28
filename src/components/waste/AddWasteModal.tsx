@@ -98,6 +98,7 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
     const [category, setCategory] = useState<WasteCategory>(WasteCategory.SMESNY);
     const [note, setNote] = useState('');
     const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
 
     const handleSuggest = () => {
         if (!name.trim()) {
@@ -118,18 +119,28 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name.trim()) return;
+        const normalizedName = name.trim().replace(/\s+/g, ' ');
+        const normalizedNote = note.trim().replace(/\s+/g, ' ');
+        if (normalizedName.length < 2) {
+            setFormError('Zadejte nazev odpadu.');
+            return;
+        }
+        if (normalizedName.length > 80) {
+            setFormError('Nazev je prilis dlouhy.');
+            return;
+        }
 
         onAdd({
-            name: name.trim(),
+            name: normalizedName,
             category,
-            note: note.trim()
+            note: normalizedNote.slice(0, 400)
         });
 
         setName('');
         setCategory(WasteCategory.SMESNY);
         setNote('');
         setSuggestionMessage(null);
+        setFormError(null);
         onClose();
     };
 
@@ -154,6 +165,7 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
                                 onChange={(e) => {
                                     setName(e.target.value);
                                     setSuggestionMessage(null);
+                                    setFormError(null);
                                 }}
                                 placeholder="např. Krabice od pizzy"
                                 className="flex-1 px-6 py-4 rounded-2xl border-4 border-slate-200 text-lg font-bold focus:outline-none focus:border-emerald-400 transition-all"
@@ -175,6 +187,11 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
                         {suggestionMessage && (
                             <p className={`text-xs mt-2 font-bold ${suggestionMessage.includes('✓') ? 'text-green-600' : 'text-amber-600'}`}>
                                 {suggestionMessage}
+                            </p>
+                        )}
+                        {formError && (
+                            <p className="text-xs mt-2 font-bold text-red-600" role="alert" aria-live="assertive">
+                                {formError}
                             </p>
                         )}
                     </div>
