@@ -5,7 +5,11 @@ const readline = require("readline");
 
 // ===== KONFIGURACE =====
 // API klíč můžete změnit nebo použít proměnnou prostředí
-const API_KEY = process.env.GEMINI_API_KEY || "AIzaSyAfvlLC9FOEB45G0nv8zgH4TUnLfalU_VM";
+const API_KEY = process.env.GEMINI_API_KEY;
+
+if (!API_KEY) {
+  throw new Error('GEMINI_API_KEY must be provided through the environment.');
+}
 
 // Název souboru s kalendářem (ve stejné složce jako tento skript)
 const CALENDAR_IMAGE = "kalendar.jpg";

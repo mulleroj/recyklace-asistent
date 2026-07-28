@@ -1,15 +1,22 @@
 ﻿
-import React, { useState, useEffect } from 'react';
-import { AIProviderManager } from './services/aiProviderManager';
-import { AIProvider, ApiKeyError } from './services/aiProviderInterface';
-import { WasteItem, ChatHistoryItem } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { WasteCategory, WasteItem, ChatHistoryItem } from './types';
 import CategoryBadge from './components/CategoryBadge';
 import { WASTE_DATABASE } from './constants';
-import { findLocalMatch } from './utils/fuzzySearch';
+import { findLocalMatch, findSuggestions, normalizeForSearch } from './utils/fuzzySearch';
 import { getAICache } from './utils/aiCache';
 import { getAnalytics, AnalyticsEvent } from './utils/analytics';
 import { retryApiCall } from './utils/retryLogic';
-import { prefetchPopularQueries, shouldPrefetch } from './utils/prefetch';
+import { identifyWasteViaProxy } from './src/services/aiProxyClient';
+import {
+  clearLegacyAiKeys,
+  dedupeUserItems,
+  HISTORY_LIMIT,
+  normalizeQuery,
+  parseHistory,
+  parseUserDatabase,
+  UserWasteItem,
+} from './src/utils/storage';
 
 // Hooks
 import { useSpeech } from './src/hooks/useSpeech';
@@ -27,7 +34,6 @@ import AddWasteModal from './src/components/waste/AddWasteModal';
 import CollectionAlert from './src/components/schedule/CollectionAlert';
 import NotificationPrompt from './src/components/ui/NotificationPrompt';
 import NotificationSettings from './src/components/ui/NotificationSettings';
-import ApiKeyPrompt from './src/components/ui/ApiKeyPrompt';
 import HelpModal from './src/components/ui/HelpModal';
 import RecyclingTips from './src/components/ui/RecyclingTips';
 import LoadingSpinner from './src/components/ui/LoadingSpinner';
@@ -50,17 +56,13 @@ const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
-  const [showApiKeyPrompt, setShowApiKeyPrompt] = useState(false); // CHANGED: no auto-prompt
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>(() =>
-    AIProviderManager.getInstance().getCurrentProvider()
-  );
-  const [apiKeyError, setApiKeyError] = useState<string | undefined>();
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ name: string; category: string; note?: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pendingQuery, setPendingQuery] = useState<{ text?: string; image?: { data: string; mimeType: string } } | null>(null);
   const [isAnalyticsDashboardOpen, setIsAnalyticsDashboardOpen] = useState(false);
+  const requestRef = useRef<{ id: number; controller?: AbortController }>({ id: 0 });
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(() => {
     // Show prompt if not shown before and notifications not yet enabled
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -75,15 +77,11 @@ const App: React.FC = () => {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   // User-added database items (stored in localStorage)
-  const [userDatabase, setUserDatabase] = useState<Array<{ name: string; category: string; note: string }>>(() => {
-    try {
-      const saved = localStorage.getItem(USER_DATABASE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.error("Failed to load user database from localStorage", e);
-      return [];
-    }
-  });
+  const [userDatabase, setUserDatabase] = useState<UserWasteItem[]>(() => parseUserDatabase(localStorage.getItem(USER_DATABASE_KEY)));
+
+  useEffect(() => {
+    clearLegacyAiKeys();
+  }, []);
 
   // Save user database to localStorage
   useEffect(() => {
@@ -93,8 +91,10 @@ const App: React.FC = () => {
   // Merge both databases for searching
   const fullDatabase = [...WASTE_DATABASE, ...userDatabase];
 
-  const handleAddUserItem = (item: { name: string; category: string; note: string }) => {
-    setUserDatabase(prev => [item, ...prev]);
+  const handleAddUserItem = (item: { name: string; category: WasteCategory; note: string }) => {
+    const createdAt = Date.now();
+    const normalized = { ...item, id: `user-${createdAt}`, createdAt, source: 'manual' as const };
+    setUserDatabase(prev => dedupeUserItems([normalized, ...prev]).slice(0, 200));
 
     // Track user added item
     const analytics = getAnalytics();
@@ -113,7 +113,7 @@ const App: React.FC = () => {
       query: transcript || res.name,
       result: res,
       timestamp: Date.now()
-    }, ...prev.slice(0, 49)]);
+    }, ...prev.slice(0, HISTORY_LIMIT - 1)]);
     setQuery('');
     setLoading(false);
 
@@ -149,15 +149,7 @@ const App: React.FC = () => {
     capturePhoto
   } = useCamera();
 
-  const [history, setHistory] = useState<ChatHistoryItem[]>(() => {
-    try {
-      const savedHistory = localStorage.getItem(STORAGE_KEY);
-      return savedHistory ? JSON.parse(savedHistory) : [];
-    } catch (e) {
-      console.error("Failed to load history from localStorage", e);
-      return [];
-    }
-  });
+  const [history, setHistory] = useState<ChatHistoryItem[]>(() => parseHistory(localStorage.getItem(STORAGE_KEY)));
 
   const deleteHistoryItem = (timestamp: number) => {
     setHistory(prev => prev.filter(item => item.timestamp !== timestamp));
@@ -184,63 +176,14 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
   }, [history]);
 
-  // Service Worker update detection
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then((registration) => {
-        // Check for updates every 5 minutes
-        setInterval(() => {
-          registration.update().catch(err => {
-            console.warn('Failed to check for SW update:', err);
-          });
-        }, 5 * 60 * 1000);
-
-        // Listen for new service worker waiting
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (!newWorker) return;
-
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New version available
-              console.log('🎉 New version available!');
-              setWaitingWorker(newWorker);
-              setShowUpdatePrompt(true);
-            }
-          });
-        });
-      });
-
-      // Listen for controller change (when skipWaiting is called)
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        console.log('🔄 New SW activated, reloading...');
-        window.location.reload();
-      });
-    }
-  }, []);
-
-  // Smart prefetching - warm up cache with popular queries
-  useEffect(() => {
-    // Only run once on mount
-    if (!shouldPrefetch()) return;
-
-    const runPrefetch = async () => {
-      try {
-        await prefetchPopularQueries(
-          async (query) => {
-            // Silent search - just to populate cache
-            await handleIdentify({ text: query, skipCache: false, skipSuggestions: true });
-          },
-          20, // Max 20 items
-          3000 // Wait 3 seconds after app load
-        );
-      } catch (error) {
-        console.error('Prefetch failed:', error);
-      }
+    const handleUpdate = (event: Event) => {
+      setWaitingWorker((event as CustomEvent<ServiceWorker>).detail);
+      setShowUpdatePrompt(true);
     };
-
-    runPrefetch();
-  }, []); // Run only once on mount
+    window.addEventListener('sw-update-available', handleUpdate);
+    return () => window.removeEventListener('sw-update-available', handleUpdate);
+  }, []);
 
   const handleIdentify = async ({ text, image, skipCache = false, skipSuggestions = false }: {
     text?: string;
@@ -248,10 +191,16 @@ const App: React.FC = () => {
     skipCache?: boolean;
     skipSuggestions?: boolean;
   }) => {
-    // DEBUG: Log the incoming query to check for truncation
-    if (text) {
-      console.log(`🔵 handleIdentify received text: "${text}", length: ${text.length}`);
+    const normalizedText = text ? normalizeQuery(text) : undefined;
+    if (!normalizedText && !image) {
+      setError('Zadejte nazev odpadu.');
+      return;
     }
+
+    requestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const requestId = requestRef.current.id + 1;
+    requestRef.current = { id: requestId, controller };
 
     setLoading(true);
     setError(null);
@@ -261,40 +210,38 @@ const App: React.FC = () => {
       const aiCache = getAICache();
 
       // 1. Lokální databáze (včetně uživatelské)
-      if (text) {
-        const localMatch = findLocalMatch(text, fullDatabase);
+      if (normalizedText) {
+        const localMatch = findLocalMatch(normalizedText, fullDatabase);
         if (localMatch) {
           const isUserItem = userDatabase.some(item => item.name === localMatch.name);
           handleIdentifyResult({
-            id: 'local-' + Math.random().toString(36).substring(7),
+            id: `local-${Date.now()}`,
             ...localMatch,
             isFromDatabase: true,
             source: isUserItem ? 'user' : 'local'
-          }, text);
+          }, normalizedText);
           return;
         }
       }
 
       // 2. Check AI cache
       if (!skipCache) {
-        if (text) {
-          const cachedResult = aiCache.findByQuery(text);
+        if (normalizedText) {
+          const cachedResult = aiCache.findByQuery(normalizedText);
           if (cachedResult) {
-            console.log('✅ Found in AI cache:', cachedResult.name);
             handleIdentifyResult({
-              id: 'cache-' + Math.random().toString(36).substring(7),
+              id: `cache-${Date.now()}`,
               ...cachedResult,
               isFromDatabase: false,
               source: 'ai'
-            }, text);
+            }, normalizedText);
             return;
           }
         } else if (image) {
           const cachedResult = aiCache.findByImage(image.data);
           if (cachedResult) {
-            console.log('✅ Found in AI cache (by image):', cachedResult.name);
             handleIdentifyResult({
-              id: 'cache-' + Math.random().toString(36).substring(7),
+              id: `cache-${Date.now()}`,
               ...cachedResult,
               isFromDatabase: false,
               source: 'ai'
@@ -305,22 +252,12 @@ const App: React.FC = () => {
       }
 
       // 3. Show suggestions before calling AI (only for text queries)
-      if (!skipSuggestions && text && !image) {
-        // Find top 3 similar items with lower threshold
-        const similarItems: Array<{ name: string; category: string; note?: string; score: number }> = [];
-
-        for (const item of fullDatabase) {
-          const match = findLocalMatch(text, [item], 5); // Higher threshold for suggestions
-          if (match) {
-            similarItems.push({ ...match, score: Math.random() }); // TODO: actual scoring
-          }
-        }
-
+      if (!skipSuggestions && normalizedText && !image) {
+        const similarItems = findSuggestions(normalizedText, fullDatabase, 3);
         if (similarItems.length > 0) {
-          const topSuggestions = similarItems.slice(0, 3);
-          setSuggestions(topSuggestions);
+          setSuggestions(similarItems);
           setShowSuggestions(true);
-          setPendingQuery({ text, image });
+          setPendingQuery({ text: normalizedText, image });
           setLoading(false);
           return;
         }
@@ -329,72 +266,52 @@ const App: React.FC = () => {
       // 4. AI analýza (vyžaduje online)
       if (!isOnline) {
         const analytics = getAnalytics();
-        analytics.track(AnalyticsEvent.ERROR_OFFLINE, { query: text, hasImage: !!image });
+        analytics.track(AnalyticsEvent.ERROR_OFFLINE, { hasImage: !!image });
         setError(image ? 'Focení vyžaduje internet.' : 'Tuto položku nemám v databázi a jste offline.');
         setLoading(false);
         return;
       }
 
-      // Check if AI service is available
-      const aiManager = AIProviderManager.getInstance();
-      const aiService = aiManager.getAIService();
-
-      if (!aiService) {
-        const analytics = getAnalytics();
-        analytics.track(AnalyticsEvent.ERROR_NO_API_KEY);
-        setError('Pro neznámé položky můžete nastavit API klíč v nastavení.');
-        setLoading(false);
-        return;
-      }
-
-      console.log('🤖 Calling AI service...');
       const analytics = getAnalytics();
-      analytics.track(AnalyticsEvent.SEARCH_AI_CALL, { query: text, hasImage: !!image });
+      analytics.track(AnalyticsEvent.SEARCH_AI_CALL, { hasImage: !!image });
 
       const aiRes = await retryApiCall(
-        () => aiService.identifyWaste({ query: text, image }),
+        () => identifyWasteViaProxy({ query: normalizedText, image }, controller.signal),
         'AI waste identification'
       );
+      if (requestRef.current.id !== requestId) return;
 
       // Uložit do AI cache
       aiCache.add({
         name: aiRes.name,
         category: aiRes.category,
         note: aiRes.note || '',
-        query: text,
+        query: normalizedText,
         imageData: image?.data,
       });
 
       // Automaticky uložit AI výsledek do uživatelské databáze pro budoucí vyhledávání
-      const aiItem = {
+      const aiItem: UserWasteItem = {
+        id: `ai-${Date.now()}`,
         name: aiRes.name,
         category: aiRes.category,
-        note: aiRes.note || ''
+        note: `${aiRes.note || ''} (Navrhl AI asistent - lze upravit nebo odstranit.)`,
+        source: 'ai',
+        createdAt: Date.now(),
       };
 
-      // Zkontrolovat, zda položka již není v databázi (aby se nedulikovaly)
       const alreadyExists = userDatabase.some(
-        item => item.name.toLowerCase() === aiItem.name.toLowerCase()
+        item => normalizeForSearch(item.name) === normalizeForSearch(aiItem.name)
       );
 
       if (!alreadyExists) {
-        setUserDatabase(prev => [aiItem, ...prev]);
+        setUserDatabase(prev => dedupeUserItems([aiItem, ...prev]).slice(0, 200));
       }
 
-      handleIdentifyResult({ ...aiRes, source: 'ai' }, text);
+      handleIdentifyResult({ ...aiRes, source: 'ai' }, normalizedText);
     } catch (err) {
-      if (err instanceof ApiKeyError) {
-        setApiKeyError(err.message);
-        if (err.shouldPromptForKey) {
-          setShowApiKeyPrompt(true);
-          if (err.provider) {
-            setSelectedProvider(err.provider);
-          }
-        }
-        setError(err.message);
-      } else {
-        setError('Nepodařilo se spojit s asistentem.');
-      }
+      if ((err as Error).name === 'AbortError') return;
+      setError(err instanceof Error ? err.message : 'Nepodarilo se spojit s asistentem.');
       setLoading(false);
     }
   };
@@ -410,10 +327,7 @@ const App: React.FC = () => {
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         onOpenNotificationSettings={() => setIsNotificationSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
-        onOpenApiKey={() => {
-          setApiKeyError(undefined);
-          setShowApiKeyPrompt(true);
-        }}
+        onOpenApiKey={() => setError('AI asistent pouziva serverovy endpoint. API klic se v aplikaci nezadava.')}
         onOpenCalendar={() => setIsCalendarOpen(true)}
         onOpenAnalytics={() => setIsAnalyticsDashboardOpen(true)}
       />
@@ -472,8 +386,8 @@ const App: React.FC = () => {
               </button>
             </div>
             <div className="space-y-4">
-              {history.map((item, i) => (
-                <div key={i} className="relative group">
+              {history.map((item) => (
+                <div key={`${item.timestamp}-${item.query}`} className="relative group">
                   <button
                     onClick={() => {
                       setResult({ ...item.result, source: (item.result as any).source });
@@ -483,7 +397,7 @@ const App: React.FC = () => {
                   >
                     <div className="flex flex-col">
                       <span className="text-xl font-bold text-slate-800 break-words pr-4">{item.query}</span>
-                      <span className="text-xs text-slate-400 font-bold uppercase">{new Date(item.timestamp).toLocaleTimeString('cs-CZ')}</span>
+                      <span className="text-xs text-slate-400 font-bold uppercase">{new Date(item.timestamp).toLocaleString('cs-CZ')}</span>
                     </div>
                     <CategoryBadge category={item.result.category} variant="minimal" />
                   </button>
@@ -492,7 +406,8 @@ const App: React.FC = () => {
                       e.stopPropagation();
                       deleteHistoryItem(item.timestamp);
                     }}
-                    className="absolute -right-2 -top-2 w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center border-2 border-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute -right-2 -top-2 w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center border-2 border-white shadow-md opacity-100 transition-opacity"
+                    aria-label={`Smazat ${item.query} z historie`}
                     title="Smazat záznam"
                   >
                     ✕
@@ -536,32 +451,13 @@ const App: React.FC = () => {
         onClose={() => setIsNotificationSettingsOpen(false)}
       />
 
-      <ApiKeyPrompt
-        isOpen={showApiKeyPrompt}
-        onSave={(key, provider) => {
-          const aiManager = AIProviderManager.getInstance();
-          aiManager.setApiKey(provider, key);
-          setSelectedProvider(provider);
-          setShowApiKeyPrompt(false);
-          setApiKeyError(undefined);
-          setError(null);
-        }}
-        onSkip={() => {
-          setShowApiKeyPrompt(false);
-          setApiKeyError(undefined);
-        }}
-        errorMessage={apiKeyError}
-        selectedProvider={selectedProvider}
-      />
-
-
       {showSuggestions && (
         <SuggestionList
           suggestions={suggestions}
           onSelect={(suggestion) => {
             setShowSuggestions(false);
             handleIdentifyResult({
-              id: 'suggestion-' + Math.random().toString(36).substring(7),
+              id: `suggestion-${Date.now()}`,
               name: suggestion.name,
               category: suggestion.category as any,
               note: suggestion.note || '',
@@ -613,8 +509,6 @@ const App: React.FC = () => {
         isOpen={isCalendarOpen}
         onClose={() => setIsCalendarOpen(false)}
       />
-
-      <InstallPrompt />
 
       <AnalyticsDashboard
         isOpen={isAnalyticsDashboardOpen}

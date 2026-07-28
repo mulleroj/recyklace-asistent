@@ -137,7 +137,7 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
             const NOTIFICATION_ICON = 'https://cdn-icons-png.flaticon.com/512/3299/3299935.png';
             const iconUrl = navigator.onLine ? NOTIFICATION_ICON : '/icon-512.png';
 
-            await registration.showNotification('🚛 Testovací upozornění', {
+            const options: NotificationOptions & { vibrate?: number[] } = {
                 body: '📅 Tento formát uvidíte před svozem\n🗑️ Připravte popelnice',
                 icon: iconUrl,
                 badge: iconUrl,
@@ -145,7 +145,9 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
                 requireInteraction: false,
                 vibrate: [200, 100, 200, 100, 200],
                 silent: false
-            });
+            };
+
+            await registration.showNotification('🚛 Testovací upozornění', options);
 
             addLog('✅ Notifikace úspěšně odeslána!');
             setTestSent(true);
@@ -220,7 +222,7 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="font-bold text-slate-800">Upozornění aktivní</p>
-                            <p className="text-sm text-slate-500">Dostanete připomínku před svozem</p>
+                            <p className="text-sm text-slate-500">Aplikace zkontroluje blizici se svoz pri otevreni. Systemove upozorneni zavisi na prohlizeci.</p>
                         </div>
                         <button
                             onClick={() => setPrefs(prev => ({ ...prev, enabled: !prev.enabled }))}
@@ -306,11 +308,11 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
                                     : 'border-slate-300 text-slate-500 hover:border-emerald-400 hover:text-emerald-600'
                                     }`}
                             >
-                                {testSent ? '✓ Odesláno!' : '🔔 Otestovat upozornění'}
+                                {testSent ? 'Odeslano' : 'Otestovat upozorneni v prohlizeci'}
                             </button>
                             {testError && (
                                 <p className="text-red-600 text-sm bg-red-50 p-2 rounded-lg">
-                                    ⚠️ {testError}
+                                    {testError}
                                 </p>
                             )}
 
@@ -330,7 +332,7 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ isOpen, onC
                     {prefs.enabled && permissionStatus === 'granted' && (
                         <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4">
                             <p className="text-emerald-800 text-sm">
-                                ✓ Budete upozorněni <strong>{getDaysLabel(prefs.daysBefore).toLowerCase()}</strong> v <strong>{prefs.time}</strong>
+                                Aplikace bude pri otevreni kontrolovat svoz <strong>{getDaysLabel(prefs.daysBefore).toLowerCase()}</strong>. Presny cas systemove notifikace web negarantuje.
                             </p>
                         </div>
                     )}

@@ -12,6 +12,7 @@ const InstallPrompt: React.FC = () => {
     const [isInstalled, setIsInstalled] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
     const [showIOSInstructions, setShowIOSInstructions] = useState(false);
+    const [status, setStatus] = useState('');
 
     useEffect(() => {
         // Listen for manual show event from header button
@@ -62,7 +63,7 @@ const InstallPrompt: React.FC = () => {
     const handleInstall = async () => {
         // First check if already installed
         if (window.matchMedia('(display-mode: standalone)').matches) {
-            alert('✅ Aplikace je již nainstalovaná!\n\nNajdete ji na ploše vašeho zařízení.');
+            setStatus('Aplikace je již nainstalovaná.');
             setIsVisible(false);
             return;
         }
@@ -75,7 +76,9 @@ const InstallPrompt: React.FC = () => {
 
                 if (outcome === 'accepted') {
                     setIsInstalled(true);
-                    alert('✅ Aplikace byla úspěšně nainstalována!');
+                    setStatus('Instalace byla potvrzena.');
+                } else {
+                    setStatus('Instalace byla zrušena.');
                 }
 
                 setDeferredPrompt(null);
@@ -187,6 +190,11 @@ const InstallPrompt: React.FC = () => {
                                 ✕
                             </button>
                         </div>
+                        {status && (
+                            <p className="mt-3 text-sm font-bold text-white" role="status" aria-live="polite">
+                                {status}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
