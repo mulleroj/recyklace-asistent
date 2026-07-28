@@ -3,9 +3,24 @@ import handler from '../../netlify/functions/identify-waste.mts';
 import { WasteCategory } from '../../types';
 
 const url = 'https://example.test/.netlify/functions/identify-waste';
+const previewUrl = 'https://deploy-preview-1--recyklace.netlify.app/.netlify/functions/identify-waste';
+const productionUrl = 'https://recyklace.netlify.app/.netlify/functions/identify-waste';
+const aiErrorClassHeader = 'x-recyklace-ai-error-class';
+const legacyMimeField = `response${'Mime'}Type`;
+const legacySchemaField = `response${'Schema'}`;
+const allowedAiErrorClasses = new Set([
+  'invalid-request',
+  'auth-config',
+  'model-not-found',
+  'quota',
+  'provider-timeout',
+  'provider-unavailable',
+  'invalid-provider-response',
+  'network-failure',
+]);
 
-function request(init: RequestInit) {
-  return new Request(url, init);
+function request(init: RequestInit, targetUrl = url) {
+  return new Request(targetUrl, init);
 }
 
 describe('identify-waste Netlify Function', () => {
@@ -15,6 +30,7 @@ describe('identify-waste Netlify Function', () => {
     vi.useRealTimers();
     process.env.GEMINI_API_KEY = 'test-key';
     delete process.env.GEMINI_MODEL;
+    delete process.env.CONTEXT;
   });
 
   it('rejects missing API key', async () => {
@@ -135,7 +151,7 @@ describe('identify-waste Netlify Function', () => {
     expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('test-key');
   });
 
-  it('sends an explicit structured JSON response schema', async () => {
+  it('sends the documented structured JSON response format', async () => {
     const fetchMock = mockGeminiSuccess();
     await handler(request({
       method: 'POST',
@@ -144,17 +160,52 @@ describe('identify-waste Netlify Function', () => {
     }));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(init.body));
-    expect(body.generationConfig.responseMimeType).toBe('application/json');
-    expect(body.generationConfig.responseSchema.required).toEqual([
+    const format = body.generationConfig.responseFormat;
+    expect(format.text.mimeType).toBe('application/json');
+    expect(format.text.schema.required).toEqual([
       'name',
       'category',
       'note',
       'isFromDatabase',
     ]);
-    expect(body.generationConfig.responseSchema.properties.category.enum).toContain(WasteCategory.PLAST);
+    expect(format.text.schema.additionalProperties).toBe(false);
+    expect(format.text.schema.properties.category.enum).toContain(WasteCategory.PLAST);
+    expect(body.generationConfig[legacyMimeField]).toBeUndefined();
+    expect(body.generationConfig[legacySchemaField]).toBeUndefined();
   });
 
-  it('maps provider 404 for missing models to a safe public error', async () => {
+  it('sends image requests with inline_data', async () => {
+    const fetchMock = mockGeminiSuccess();
+    await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        query: 'obal',
+        image: { mimeType: 'image/png', data: 'iVBORw0KGgo=' },
+      }),
+    }));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.contents[0].parts[1]).toEqual({
+      inline_data: { data: 'iVBORw0KGgo=', mime_type: 'image/png' },
+    });
+  });
+
+  it('classifies provider 400 as invalid-request on deploy previews', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: { status: 'INVALID_ARGUMENT', message: 'schema rejected by provider' },
+    }, { status: 400 })));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, previewUrl));
+    expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('invalid-request');
+  });
+
+  it('maps provider 404 for missing models to model-not-found diagnostics', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
       error: { status: 'NOT_FOUND', message: 'model not found' },
@@ -163,13 +214,14 @@ describe('identify-waste Netlify Function', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'lahev' }),
-    }));
+    }, previewUrl));
     const data = await response.json();
     expect(response.status).toBe(502);
     expect(data.error).toBe('AI asistent je docasne nedostupny.');
+    expect(response.headers.get(aiErrorClassHeader)).toBe('model-not-found');
   });
 
-  it('maps provider auth failures without exposing provider body or key', async () => {
+  it('maps provider auth failures to auth-config without exposing provider body or key', async () => {
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
       error: { status: 'PERMISSION_DENIED', message: 'bad key test-key' },
@@ -178,9 +230,10 @@ describe('identify-waste Netlify Function', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'lahev' }),
-    }));
+    }, previewUrl));
     const data = await response.json();
     expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('auth-config');
     expect(JSON.stringify(data)).not.toContain('PERMISSION_DENIED');
     expect(JSON.stringify(data)).not.toContain('test-key');
     expect(JSON.stringify(logSpy.mock.calls)).not.toContain('test-key');
@@ -195,12 +248,13 @@ describe('identify-waste Netlify Function', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'lahev' }),
-    }));
+    }, previewUrl));
     expect(response.status).toBe(503);
     expect(response.headers.get('retry-after')).toBe('30');
+    expect(response.headers.get(aiErrorClassHeader)).toBe('quota');
   });
 
-  it('maps provider timeout to a safe 504 response', async () => {
+  it('maps provider timeout to provider-timeout diagnostics', async () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
@@ -210,11 +264,26 @@ describe('identify-waste Netlify Function', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'lahev' }),
-    }));
+    }, previewUrl));
     await vi.advanceTimersByTimeAsync(12_000);
     const response = await pending;
     expect(response.status).toBe(504);
     expect(response.headers.get('retry-after')).toBe('30');
+    expect(response.headers.get(aiErrorClassHeader)).toBe('provider-timeout');
+  });
+
+  it('maps provider 5xx to provider-unavailable diagnostics', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: { status: 'UNAVAILABLE' },
+    }, { status: 503 })));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, previewUrl));
+    expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('provider-unavailable');
   });
 
   it('returns normalized successful response', async () => {
@@ -258,7 +327,7 @@ describe('identify-waste Netlify Function', () => {
     expect(data.item.category).toBe(WasteCategory.SMESNY);
   });
 
-  it('returns a safe error for invalid provider JSON', async () => {
+  it('classifies invalid provider JSON as invalid-provider-response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
       candidates: [{ content: { parts: [{ text: 'not json' }] } }],
@@ -267,8 +336,56 @@ describe('identify-waste Netlify Function', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'lahev' }),
-    }));
+    }, previewUrl));
     expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('invalid-provider-response');
+  });
+
+  it('classifies fetch failures as network-failure', async () => {
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down with test-key')));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, previewUrl));
+    expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBe('network-failure');
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain('test-key');
+  });
+
+  it('does not expose diagnostic headers on production', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: { status: 'INVALID_ARGUMENT', message: 'schema rejected by provider' },
+    }, { status: 400 })));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, productionUrl));
+    expect(response.status).toBe(502);
+    expect(response.headers.get(aiErrorClassHeader)).toBeNull();
+  });
+
+  it('limits preview diagnostics to allowed coarse classes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: {
+        status: 'INVALID_ARGUMENT',
+        message: 'provider message containing test-key and schema internals',
+      },
+    }, { status: 400 })));
+    const response = await handler(request({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'lahev' }),
+    }, previewUrl));
+    const errorClass = response.headers.get(aiErrorClassHeader);
+    expect(errorClass).toBe('invalid-request');
+    expect(allowedAiErrorClasses.has(errorClass || '')).toBe(true);
+    expect(errorClass).not.toContain('test-key');
+    expect(errorClass).not.toContain('provider message');
   });
 
   it('logs only safe metadata for upstream errors', async () => {

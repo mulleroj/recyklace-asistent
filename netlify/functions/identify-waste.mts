@@ -17,11 +17,24 @@ category musi byt jedna z povolenych hodnot: ${Object.values(WasteCategory).join
 Pokud si nejsi jisty, zvol bezpecnou kategorii a napis to do note.`;
 
 const allowedCategories = new Set(Object.values(WasteCategory));
+const AI_ERROR_CLASS_HEADER = 'x-recyklace-ai-error-class';
+const PREVIEW_HOST_PATTERN = /^deploy-preview-\d+--recyklace\.netlify\.app$/;
+
+type AiErrorClass =
+  | 'invalid-request'
+  | 'auth-config'
+  | 'model-not-found'
+  | 'quota'
+  | 'provider-timeout'
+  | 'provider-unavailable'
+  | 'invalid-provider-response'
+  | 'network-failure';
 
 class GeminiUpstreamError extends Error {
   constructor(
     readonly status: number,
     readonly reason: string,
+    readonly errorClass: AiErrorClass,
     readonly publicStatus = 502,
     readonly retryAfter?: number,
   ) {
@@ -76,7 +89,10 @@ export default async (request: Request): Promise<Response> => {
     return json(
       { ok: false, error: 'AI asistent je docasne nedostupny.' },
       upstreamError.publicStatus,
-      upstreamError.retryAfter ? { 'retry-after': String(upstreamError.retryAfter) } : undefined,
+      {
+        ...getRetryAfterHeader(upstreamError),
+        ...getPreviewErrorHeaders(request, upstreamError),
+      },
     );
   }
 };
@@ -135,16 +151,33 @@ async function callGemini(params: {
         contents: [{ role: 'user', parts }],
         generationConfig: {
           maxOutputTokens: 400,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              category: { type: 'string', enum: Object.values(WasteCategory) },
-              note: { type: 'string' },
-              isFromDatabase: { type: 'boolean' },
+          responseFormat: {
+            text: {
+              mimeType: 'application/json',
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: {
+                    type: 'string',
+                    description: 'Strucny cesky nazev rozpoznavaneho odpadu.',
+                  },
+                  category: {
+                    type: 'string',
+                    enum: Object.values(WasteCategory),
+                    description: 'Jedna z presne povolenych kategorii odpadu.',
+                  },
+                  note: {
+                    type: 'string',
+                    description: 'Strucny prakticky navod k vyhozeni odpadu v obci Povrly.',
+                  },
+                  isFromDatabase: {
+                    type: 'boolean',
+                  },
+                },
+                required: ['name', 'category', 'note', 'isFromDatabase'],
+              },
             },
-            required: ['name', 'category', 'note', 'isFromDatabase'],
           },
         },
       }),
@@ -157,11 +190,13 @@ async function callGemini(params: {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
     const text = data.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === 'string')?.text;
-    if (!text) throw new GeminiUpstreamError(502, 'missing_candidate_text');
+    if (!text) throw new GeminiUpstreamError(502, 'missing_candidate_text', 'invalid-provider-response');
     return text;
   } catch (error) {
     if (error instanceof GeminiUpstreamError) throw error;
-    if (isAbortError(error)) throw new GeminiUpstreamError(504, 'provider_timeout', 504, 30);
+    if (isAbortError(error)) {
+      throw new GeminiUpstreamError(504, 'provider_timeout', 'provider-timeout', 504, 30);
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -175,11 +210,11 @@ function buildPrompt(query?: string): string {
 function parseAiJson(text: string): Record<string, unknown> {
   const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
   const raw = fenced?.[1] || text.match(/\{[\s\S]*\}/)?.[0];
-  if (!raw) throw new GeminiUpstreamError(502, 'invalid_provider_json');
+  if (!raw) throw new GeminiUpstreamError(502, 'invalid_provider_json', 'invalid-provider-response');
   try {
     return JSON.parse(raw);
   } catch {
-    throw new GeminiUpstreamError(502, 'invalid_provider_json');
+    throw new GeminiUpstreamError(502, 'invalid_provider_json', 'invalid-provider-response');
   }
 }
 
@@ -221,18 +256,18 @@ function getServerEnv(name: string): string | undefined {
 async function createGeminiHttpError(response: Response): Promise<GeminiUpstreamError> {
   const providerReason = extractProviderReason(await safeReadBody(response));
   if (response.status === 401 || response.status === 403) {
-    return new GeminiUpstreamError(response.status, providerReason || 'provider_auth_or_config', 502);
+    return new GeminiUpstreamError(response.status, providerReason || 'provider_auth_or_config', 'auth-config', 502);
   }
   if (response.status === 404) {
-    return new GeminiUpstreamError(response.status, providerReason || 'provider_model_not_found', 502);
+    return new GeminiUpstreamError(response.status, providerReason || 'provider_model_not_found', 'model-not-found', 502);
   }
   if (response.status === 429) {
-    return new GeminiUpstreamError(response.status, providerReason || 'provider_rate_limited', 503, 30);
+    return new GeminiUpstreamError(response.status, providerReason || 'provider_rate_limited', 'quota', 503, 30);
   }
   if (response.status >= 500) {
-    return new GeminiUpstreamError(response.status, providerReason || 'provider_5xx', 502);
+    return new GeminiUpstreamError(response.status, providerReason || 'provider_5xx', 'provider-unavailable', 502);
   }
-  return new GeminiUpstreamError(response.status, providerReason || 'provider_4xx', 502);
+  return new GeminiUpstreamError(response.status, providerReason || 'provider_4xx', 'invalid-request', 502);
 }
 
 async function safeReadBody(response: Response): Promise<string> {
@@ -267,8 +302,8 @@ function sanitizeReason(reason: string): string {
 
 function normalizeUpstreamError(error: unknown): GeminiUpstreamError {
   if (error instanceof GeminiUpstreamError) return error;
-  if (isAbortError(error)) return new GeminiUpstreamError(504, 'provider_timeout', 504, 30);
-  return new GeminiUpstreamError(502, 'provider_request_failed');
+  if (isAbortError(error)) return new GeminiUpstreamError(504, 'provider_timeout', 'provider-timeout', 504, 30);
+  return new GeminiUpstreamError(502, 'provider_request_failed', 'network-failure');
 }
 
 function isAbortError(error: unknown): boolean {
@@ -286,6 +321,25 @@ function logGeminiError(
     hasImage: metadata.hasImage,
     queryLength: metadata.queryLength,
   });
+}
+
+function getRetryAfterHeader(error: GeminiUpstreamError): Record<string, string> {
+  return error.retryAfter ? { 'retry-after': String(error.retryAfter) } : {};
+}
+
+function getPreviewErrorHeaders(request: Request, error: GeminiUpstreamError): Record<string, string> {
+  if (!isDeployPreviewRequest(request)) return {};
+  return { [AI_ERROR_CLASS_HEADER]: error.errorClass };
+}
+
+function isDeployPreviewRequest(request: Request): boolean {
+  try {
+    const host = new URL(request.url).hostname.toLowerCase();
+    if (PREVIEW_HOST_PATTERN.test(host)) return true;
+  } catch {
+    // Ignore malformed URLs; the Netlify context check below is enough when present.
+  }
+  return getServerEnv('CONTEXT') === 'deploy-preview';
 }
 
 function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
