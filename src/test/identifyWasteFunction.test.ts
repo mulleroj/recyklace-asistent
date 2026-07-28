@@ -144,14 +144,14 @@ describe('identify-waste Netlify Function', () => {
     }));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(init.body));
-    expect(body.generationConfig.responseFormat.text.mimeType).toBe('application/json');
-    expect(body.generationConfig.responseFormat.text.schema.required).toEqual([
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.responseSchema.required).toEqual([
       'name',
       'category',
       'note',
       'isFromDatabase',
     ]);
-    expect(body.generationConfig.responseFormat.text.schema.properties.category.enum).toContain(WasteCategory.PLAST);
+    expect(body.generationConfig.responseSchema.properties.category.enum).toContain(WasteCategory.PLAST);
   });
 
   it('maps provider 404 for missing models to a safe public error', async () => {

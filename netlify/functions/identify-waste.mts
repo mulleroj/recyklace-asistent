@@ -13,7 +13,8 @@ const ALLOWED_GEMINI_MODELS = new Set([
 
 const SYSTEM_PROMPT = `Jsi recyklacni asistent pro obec Povrly v CR.
 Vrat pouze JSON objekt s poli name, category, note a isFromDatabase.
-category musi byt jedna z hodnot enumu WasteCategory. Pokud si nejsi jisty, napis to do note.`;
+category musi byt jedna z povolenych hodnot: ${Object.values(WasteCategory).join(' | ')}.
+Pokud si nejsi jisty, zvol bezpecnou kategorii a napis to do note.`;
 
 const allowedCategories = new Set(Object.values(WasteCategory));
 
@@ -134,20 +135,16 @@ async function callGemini(params: {
         contents: [{ role: 'user', parts }],
         generationConfig: {
           maxOutputTokens: 400,
-          responseFormat: {
-            text: {
-              mimeType: 'application/json',
-              schema: {
-                type: 'object',
-                properties: {
-                  name: { type: 'string' },
-                  category: { type: 'string', enum: Object.values(WasteCategory) },
-                  note: { type: 'string' },
-                  isFromDatabase: { type: 'boolean' },
-                },
-                required: ['name', 'category', 'note', 'isFromDatabase'],
-              },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              category: { type: 'string', enum: Object.values(WasteCategory) },
+              note: { type: 'string' },
+              isFromDatabase: { type: 'boolean' },
             },
+            required: ['name', 'category', 'note', 'isFromDatabase'],
           },
         },
       }),
