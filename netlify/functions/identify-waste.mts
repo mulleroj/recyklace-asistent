@@ -100,7 +100,7 @@ async function callGemini(params: {
       signal: controller.signal,
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' },
       }),
     });
 

@@ -62,6 +62,7 @@ const App: React.FC = () => {
   const [pendingQuery, setPendingQuery] = useState<{ text?: string; image?: { data: string; mimeType: string } } | null>(null);
   const [isAnalyticsDashboardOpen, setIsAnalyticsDashboardOpen] = useState(false);
   const requestRef = useRef<{ id: number; controller?: AbortController }>({ id: 0 });
+  const modalTriggerRef = useRef<HTMLElement | null>(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(() => {
     // Show prompt if not shown before and notifications not yet enabled
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -104,6 +105,16 @@ const App: React.FC = () => {
   };
 
   const { announceResult } = useAnnounce(soundEnabled);
+
+  const rememberModalTrigger = () => {
+    modalTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+
+  const restoreModalTrigger = () => {
+    const trigger = modalTriggerRef.current;
+    modalTriggerRef.current = null;
+    window.setTimeout(() => trigger?.focus(), 0);
+  };
 
   const handleIdentifyResult = (res: WasteItem & { source?: 'local' | 'ai' | 'user' }, transcript?: string) => {
     setResult(res);
@@ -323,11 +334,23 @@ const App: React.FC = () => {
         isOnline={isOnline}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
-        onOpenNotificationSettings={() => setIsNotificationSettingsOpen(true)}
-        onOpenHelp={() => setIsHelpOpen(true)}
+        onOpenNotificationSettings={() => {
+          rememberModalTrigger();
+          setIsNotificationSettingsOpen(true);
+        }}
+        onOpenHelp={() => {
+          rememberModalTrigger();
+          setIsHelpOpen(true);
+        }}
         onOpenApiKey={() => setError('AI asistent pouziva serverovy endpoint. API klic se v aplikaci nezadava.')}
-        onOpenCalendar={() => setIsCalendarOpen(true)}
-        onOpenAnalytics={() => setIsAnalyticsDashboardOpen(true)}
+        onOpenCalendar={() => {
+          rememberModalTrigger();
+          setIsCalendarOpen(true);
+        }}
+        onOpenAnalytics={() => {
+          rememberModalTrigger();
+          setIsAnalyticsDashboardOpen(true);
+        }}
       />
 
       <main className="max-w-2xl mx-auto px-4 pt-10">
@@ -446,7 +469,10 @@ const App: React.FC = () => {
 
       <NotificationSettings
         isOpen={isNotificationSettingsOpen}
-        onClose={() => setIsNotificationSettingsOpen(false)}
+        onClose={() => {
+          setIsNotificationSettingsOpen(false);
+          restoreModalTrigger();
+        }}
       />
 
       {showSuggestions && (
@@ -500,17 +526,26 @@ const App: React.FC = () => {
 
       <HelpModal
         isOpen={isHelpOpen}
-        onClose={() => setIsHelpOpen(false)}
+        onClose={() => {
+          setIsHelpOpen(false);
+          restoreModalTrigger();
+        }}
       />
 
       <CalendarModal
         isOpen={isCalendarOpen}
-        onClose={() => setIsCalendarOpen(false)}
+        onClose={() => {
+          setIsCalendarOpen(false);
+          restoreModalTrigger();
+        }}
       />
 
       <AnalyticsDashboard
         isOpen={isAnalyticsDashboardOpen}
-        onClose={() => setIsAnalyticsDashboardOpen(false)}
+        onClose={() => {
+          setIsAnalyticsDashboardOpen(false);
+          restoreModalTrigger();
+        }}
       />
 
       {showUpdatePrompt && (
