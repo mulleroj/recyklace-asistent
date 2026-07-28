@@ -9,7 +9,7 @@ interface FeedbackButtonsProps {
 }
 
 const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
-    itemId,
+    itemId: _itemId,
     itemName,
     category,
     onFeedback,

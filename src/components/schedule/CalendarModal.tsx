@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { WASTE_SCHEDULE, getTypeLabel, getTypeColor } from '../../../wasteSchedule';
+import { WASTE_SCHEDULE, getTypeLabel } from '../../../wasteSchedule';
 
 interface CalendarModalProps {
     isOpen: boolean;

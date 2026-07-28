@@ -41,7 +41,6 @@ import InstallPrompt from './src/components/ui/InstallPrompt';
 import UpdatePrompt from './src/components/ui/UpdatePrompt';
 import CalendarModal from './src/components/schedule/CalendarModal';
 import SuggestionList from './src/components/waste/SuggestionList';
-import FeedbackButtons from './src/components/waste/FeedbackButtons';
 import AnalyticsDashboard from './src/components/ui/AnalyticsDashboard';
 
 const STORAGE_KEY = 'recyklacni_asistent_history';
@@ -133,7 +132,7 @@ const App: React.FC = () => {
 
   const [error, setError] = useState<string | null>(null);
 
-  const { isListening, error: speechError, startListening, setError: setSpeechError } = useSpeech((transcript) => {
+  const { isListening, error: speechError, startListening } = useSpeech((transcript) => {
     setQuery(transcript);
     handleIdentify({ text: transcript });
   });
@@ -143,7 +142,6 @@ const App: React.FC = () => {
     videoRef,
     canvasRef,
     error: cameraError,
-    setError: setCameraError,
     startCamera,
     stopCamera,
     capturePhoto

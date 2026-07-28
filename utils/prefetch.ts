@@ -92,7 +92,7 @@ export function shouldPrefetch(): boolean {
         // 1. User has made at least 10 searches
         // 2. Cache hit rate is below 50%
         return stats.totalSearches >= 10 && stats.cacheHitRate < 50;
-    } catch (e) {
+    } catch {
         return false;
     }
 }
@@ -123,7 +123,7 @@ export function getPrefetchStats(): {
             alreadyCached,
             toBePrefetched: popular.length - alreadyCached,
         };
-    } catch (e) {
+    } catch {
         return {
             popularQueries: 0,
             alreadyCached: 0,

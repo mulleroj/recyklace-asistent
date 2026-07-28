@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getAnalytics } from '../../../utils/analytics';
 
 interface AnalyticsDashboardProps {
@@ -11,13 +11,7 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ isOpen, onClose
     const [popularQueries, setPopularQueries] = useState<any[]>([]);
     const [timeRange, setTimeRange] = useState<'session' | 'day' | 'week' | 'all'>('session');
 
-    useEffect(() => {
-        if (isOpen) {
-            refreshStats();
-        }
-    }, [isOpen, timeRange]);
-
-    const refreshStats = () => {
+    const refreshStats = useCallback(() => {
         const analytics = getAnalytics();
 
         let fromDate: number | undefined;
@@ -40,7 +34,13 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ isOpen, onClose
 
         setStats(analytics.getStats(fromDate));
         setPopularQueries(analytics.getPopularQueries(10));
-    };
+    }, [timeRange]);
+
+    useEffect(() => {
+        if (isOpen) {
+            refreshStats();
+        }
+    }, [isOpen, refreshStats]);
 
     const exportData = () => {
         const analytics = getAnalytics();

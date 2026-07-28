@@ -25,7 +25,7 @@ export const useCamera = () => {
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
             }
-        } catch (err) {
+        } catch {
             setError('Nepodařilo se zapnout kameru.');
         }
     }, []);

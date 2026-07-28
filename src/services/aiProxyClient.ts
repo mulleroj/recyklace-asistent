@@ -1,5 +1,12 @@
 import { WasteItem } from '../../types';
-import { IdentifyWasteParams } from '../../services/aiProviderInterface';
+
+interface IdentifyWasteParams {
+  query?: string;
+  image?: {
+    data: string;
+    mimeType: string;
+  };
+}
 
 export class AiProxyError extends Error {
   constructor(message: string) {

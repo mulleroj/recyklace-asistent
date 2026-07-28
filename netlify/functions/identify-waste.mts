@@ -1,10 +1,11 @@
-import { GoogleGenAI } from '@google/genai';
 import { WasteCategory } from '../../types';
 
 const MAX_TEXT_LENGTH = 160;
 const MAX_IMAGE_BYTES = 2_500_000;
 const MAX_BODY_BYTES = 3_500_000;
+const REQUEST_TIMEOUT_MS = 12_000;
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 const SYSTEM_PROMPT = `Jsi recyklacni asistent pro obec Povrly v CR.
 Vrat pouze JSON objekt s poli name, category, note a isFromDatabase.
@@ -14,6 +15,11 @@ const allowedCategories = new Set(Object.values(WasteCategory));
 
 export default async (request: Request): Promise<Response> => {
   if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405);
+
+  const contentType = request.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return json({ ok: false, error: 'Content-Type must be application/json.' }, 415);
+  }
 
   const contentLength = Number(request.headers.get('content-length') || 0);
   if (contentLength > MAX_BODY_BYTES) return json({ ok: false, error: 'Pozadavek je prilis velky.' }, 413);
@@ -32,19 +38,13 @@ export default async (request: Request): Promise<Response> => {
   if (!apiKey) return json({ ok: false, error: 'AI asistent neni nakonfigurovany.' }, 503);
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(validation.query) }];
-    if (validation.image) {
-      parts.push({ inlineData: { data: validation.image.data, mimeType: validation.image.mimeType } });
-    }
-
-    const response = await withTimeout(ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [{ role: 'user', parts }],
-      config: { temperature: 0.2, maxOutputTokens: 400 },
-    }), 12_000);
-
-    const parsed = parseAiJson(response.text || '{}');
+    const text = await callGemini({
+      apiKey,
+      query: validation.query,
+      image: validation.image,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
+    const parsed = parseAiJson(text);
     const item = normalizeAiResult(parsed, validation.query);
     return json({ ok: true, item });
   } catch {
@@ -76,6 +76,44 @@ function validatePayload(payload: unknown):
   }
 
   return { ok: true, query, image: image as { data: string; mimeType: string } | undefined };
+}
+
+async function callGemini(params: {
+  apiKey: string;
+  query?: string;
+  image?: { data: string; mimeType: string };
+  timeoutMs: number;
+}): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), params.timeoutMs);
+  const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(params.query) }];
+
+  if (params.image) {
+    parts.push({ inlineData: { data: params.image.data, mimeType: params.image.mimeType } });
+  }
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(params.apiKey)}`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
+      }),
+    });
+
+    if (!response.ok) throw new Error('upstream failed');
+    const data = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const text = data.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === 'string')?.text;
+    if (!text) throw new Error('missing upstream text');
+    return text;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildPrompt(query?: string): string {
@@ -110,13 +148,6 @@ function json(body: unknown, status = 200): Response {
       'cache-control': 'no-store',
     },
   });
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-  ]);
 }
 
 export const config = {

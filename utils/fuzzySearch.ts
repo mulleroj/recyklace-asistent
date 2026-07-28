@@ -1,5 +1,5 @@
 
-import { ngramSimilarity, soundsLike, calculateSimilarity } from './enhancedMatching';
+import { ngramSimilarity, soundsLike } from './enhancedMatching';
 import { getAnalytics } from './analytics';
 /**
  * Calculates the Levenshtein distance between two strings.
@@ -222,7 +222,7 @@ function getPopularityScore(itemName: string): number {
       // Map count to score: 0.0 to -0.5 (negative = boost in ranking)
       return -Math.min(match.count / 10, 0.5);
     }
-  } catch (e) {
+  } catch {
     // Analytics not available or error
   }
   return 0;
