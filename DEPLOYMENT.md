@@ -1,32 +1,12 @@
-# 🚀 Deployment Checklist - Recyklace Asistent
+# Deployment Checklist - Recyklace Asistent
 
-## ✅ Co je hotovo
+## Current Scope
 
-### 1. Git Repository
+Recyklace Asistent is a local-first React PWA. Waste lookup runs in the browser from the bundled database, fuzzy search and user-added local records.
 
-- ✅ Inicializován Git repository
-- ✅ První commit vytvořen
-- ✅ Propojeno s GitHub: `https://github.com/mulleroj/recyklace-asistent.git`
-- ✅ Kód nahrán na GitHub (branch `main`)
+The app does not require waste-recognition API keys, serverless identification functions or camera permissions.
 
-### 2. Netlify Deployment
-
-- ✅ Projekt nasazen na Netlify
-- ✅ Live URL: `https://recyklace.netlify.app`
-- ✅ Automatický deployment z GitHub aktivní
-
-### 3. Opravy a optimalizace
-
-- ✅ Odstraněn odkaz na neexistující `/index.css` (opravena console error)
-- ✅ Service Worker verze bumped na v6 (force cache refresh)
-- ✅ PWA manifest správně nakonfigurován
-- ✅ Service Worker aktualizační strategie funguje
-
----
-
-## 📋 Netlify Konfigurace
-
-### Build Settings
+## Netlify Build
 
 ```toml
 [build]
@@ -39,136 +19,36 @@
   status = 200
 ```
 
-### Environment Variables (Netlify Dashboard)
+## Environment Variables
 
-⚠️ **MUSÍTE NASTAVIT V NETLIFY UI:**
+No environment variable is required for waste recognition.
 
-1. Přejděte na: <https://app.netlify.com/sites/recyklace/settings/deploys>
-2. Environment variables
-3. Přidejte:
-   - **Key:** `GEMINI_API_KEY`
-   - **Value:** `[váš API klíč z .env.local]`
+If old project settings still contain AI-related variables from earlier versions, remove them manually after this PR is merged.
 
-**Bez tohoto klíče nebude fungovat AI asistent!**
+## Deployment Workflow
 
----
-
-## 🔄 Deployment Workflow
-
-### Automatický deployment
-
-Každý `git push` do `main` větve automaticky spustí nový deployment na Netlify.
+Each push to the configured deployment branch triggers a Netlify deploy.
 
 ```bash
-# Typický workflow:
 git add .
-git commit -m "Popis změny"
+git commit -m "Describe the change"
 git push
-# Netlify automaticky nasadí za ~1-2 minuty
 ```
 
-### Manuální trigger
+## PWA Notes
 
-V Netlify dashboard: Deploys → Trigger deploy → Deploy site
+- Service worker caches the app shell and same-origin static assets.
+- HTML is fetched network-first so updates are discoverable.
+- A waiting service worker activates only after user confirmation.
+- `/service-worker.js` is served with `Cache-Control: no-store`.
+- Notifications are used only for waste collection reminders.
 
----
+## Security Notes
 
-## 📱 PWA Funkce
+- Do not commit local environment files.
+- Keep Netlify headers in `netlify.toml`.
+- Camera permission is disabled; microphone permission is used only for voice-to-text input in supported browsers.
 
-### Service Worker
+## Reset
 
-- ✅ Automatické cachování statických assetů
-- ✅ Offline funkčnost
-- ✅ Push notifikace pro svoz odpadu
-- ✅ Automatické čištění staré cache při updatu
-
-### Instalace na zařízení
-
-- **Android Chrome:** Menu → "Nainstalovat aplikaci"
-- **iOS Safari:** Sdílet → "Přidat na plochu"
-
-### Reset Service Worker
-
-URL pro reset: `https://recyklace.netlify.app/reset.html`
-
----
-
-## 🐛 Známé problémy a řešení
-
-### Problém: Bílá obrazovka na mobilu
-
-**Příčina:** Stará verze v Service Worker cache
-
-**Řešení:**
-
-1. Otevřít `https://recyklace.netlify.app/reset.html`
-2. Kliknout "Vymazat vše"
-3. Odinstalovat a znovu nainstalovat PWA
-
-Více info: viz `MOBILE_RESET.md`
-
----
-
-## 📊 Monitoring
-
-### Netlify Dashboard
-
-- **Build logs:** <https://app.netlify.com/sites/recyklace/deploys>
-- **Analytics:** <https://app.netlify.com/sites/recyklace/analytics>
-- **Funkce:** <https://app.netlify.com/sites/recyklace/functions>
-
-### Kontrola webu
-
-- Live URL: <https://recyklace.netlify.app>
-- Browser console (F12) → zkontrolovat errory
-
----
-
-## 🔐 Bezpečnost
-
-### API Klíče
-
-- ❌ **NIKDY** necommitujte `.env.local` do Gitu
-- ✅ `.env.local` je v `.gitignore`
-- ✅ Používejte Netlify Environment Variables pro production
-
-### Headers
-
-Netlify automaticky přidává security headers:
-
-- `X-Frame-Options: DENY`
-- `X-Content-Type-Options: nosniff`
-- `Referrer-Policy: strict-origin-when-cross-origin`
-
----
-
-## 🚀 Další kroky (volitelné)
-
-### Vlastní doména
-
-1. V Netlify dashboard → Domain settings
-2. Přidat custom domain
-3. Nakonfigurovat DNS záznamy
-
-### Analytics
-
-- Netlify Analytics (placená funkce)
-- Nebo integrace s Google Analytics
-
-### Scheduled Functions
-
-Pro automatické notifikace můžete přidat Netlify Background Functions.
-
----
-
-## 📞 Support
-
-**Dokumentace:**
-
-- Netlify: <https://docs.netlify.com>
-- Vite: <https://vitejs.dev>
-- React: <https://react.dev>
-- Service Workers: <https://web.dev/learn/pwa/service-workers>
-
-**Problémy?**
-Otevřete issue na GitHub: <https://github.com/mulleroj/recyklace-asistent/issues>
+Use `/reset.html` to clear cached PWA state during manual troubleshooting.
