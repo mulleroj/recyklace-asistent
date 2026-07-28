@@ -5,6 +5,8 @@ export interface ScheduleEntry {
   types: string[];
 }
 
+const ALLOWED_SCHEDULE_TYPES = new Set(['plast', 'papir', 'sklo', 'bio', 'smesny']);
+
 export const WASTE_SCHEDULE: ScheduleEntry[] = scheduleData.schedule;
 
 export function toLocalDateKey(date: Date = new Date()): string {
@@ -29,16 +31,33 @@ export function validateSchedule(entries: ScheduleEntry[] = WASTE_SCHEDULE): str
       errors.push(`Invalid date format: ${entry.date}`);
       continue;
     }
+    const [year, month, day] = entry.date.split('-').map(Number);
+    const parsedDate = new Date(year, month - 1, day);
+    if (
+      parsedDate.getFullYear() !== year ||
+      parsedDate.getMonth() !== month - 1 ||
+      parsedDate.getDate() !== day
+    ) {
+      errors.push(`Impossible date: ${entry.date}`);
+    }
     if (seen.has(entry.date)) errors.push(`Duplicate date: ${entry.date}`);
     seen.add(entry.date);
     if (previous && entry.date < previous) errors.push(`Schedule is not sorted at ${entry.date}`);
     previous = entry.date;
     if (!Array.isArray(entry.types) || entry.types.length === 0) {
       errors.push(`Missing waste type for ${entry.date}`);
+    } else {
+      for (const type of entry.types) {
+        if (!ALLOWED_SCHEDULE_TYPES.has(type)) errors.push(`Unknown waste type ${type} for ${entry.date}`);
+      }
     }
   }
 
   return errors;
+}
+
+export function hasScheduleEntriesForYear(year: number, entries: ScheduleEntry[] = WASTE_SCHEDULE): boolean {
+  return entries.some(entry => entry.date.startsWith(`${year}-`));
 }
 
 export function getNextCollection(fromDate: Date = new Date()): ScheduleEntry | null {

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { WASTE_SCHEDULE, getTypeLabel } from '../../../wasteSchedule';
+import { WASTE_SCHEDULE, getTypeLabel, hasScheduleEntriesForYear } from '../../../wasteSchedule';
 
 interface CalendarModalProps {
     isOpen: boolean;
@@ -71,6 +71,7 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
     const daysInMonth = getDaysInMonth(currentMonth, currentYear);
     const firstDay = getFirstDayOfMonth(currentMonth, currentYear);
     const days = [];
+    const hasYearData = hasScheduleEntriesForYear(currentYear);
 
     // Empty cells for days before the first day
     for (let i = 0; i < firstDay; i++) {
@@ -187,6 +188,12 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                     <div className="grid grid-cols-7 gap-1">
                         {days}
                     </div>
+
+                    {!hasYearData && (
+                        <div className="mt-6 p-4 rounded-2xl bg-amber-50 border-2 border-amber-200 text-amber-800 font-bold text-sm">
+                            Kalendář svozů pro rok {currentYear} zatím nebyl zveřejněn.
+                        </div>
+                    )}
 
                     {/* Legend */}
                     <div className="mt-6 pt-4 border-t-2 border-slate-100">
