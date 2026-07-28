@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { WASTE_SCHEDULE, getTypeLabel, hasScheduleEntriesForYear } from '../../../wasteSchedule';
 
@@ -127,12 +126,18 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
         <div
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={(e) => e.target === e.currentTarget && onClose()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="collection-calendar-title"
         >
             <div className="bg-white rounded-3xl max-w-md w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
                 {/* Header */}
                 <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4 text-white relative">
                     <button
+                        type="button"
                         onClick={onClose}
+                        aria-label="Zavřít kalendář"
+                        title="Zavřít kalendář"
                         className="absolute top-3 right-3 w-10 h-10 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white text-xl transition-all"
                     >
                         ✕
@@ -140,7 +145,7 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                     <div className="flex items-center gap-3">
                         <span className="text-3xl">📅</span>
                         <div>
-                            <h2 className="text-xl font-black uppercase">Kalendář svozů</h2>
+                            <h2 id="collection-calendar-title" className="text-xl font-black uppercase">Kalendář svozů</h2>
                             <p className="text-emerald-100 text-xs">Obec Povrly</p>
                         </div>
                     </div>
@@ -149,7 +154,10 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                 {/* Month Navigation */}
                 <div className="flex items-center justify-between p-4 border-b-2 border-slate-100">
                     <button
+                        type="button"
                         onClick={prevMonth}
+                        aria-label="Předchozí měsíc"
+                        title="Předchozí měsíc"
                         className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-600 font-bold transition-all active:scale-95"
                     >
                         ◀
@@ -159,6 +167,7 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                             {MONTHS[currentMonth]} {currentYear}
                         </h3>
                         <button
+                            type="button"
                             onClick={goToToday}
                             className="text-xs text-emerald-600 font-bold hover:underline"
                         >
@@ -166,7 +175,10 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                         </button>
                     </div>
                     <button
+                        type="button"
                         onClick={nextMonth}
+                        aria-label="Další měsíc"
+                        title="Další měsíc"
                         className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-600 font-bold transition-all active:scale-95"
                     >
                         ▶

@@ -114,6 +114,16 @@ const App: React.FC = () => {
     window.setTimeout(() => trigger?.focus(), 0);
   };
 
+  const openAddWasteModal = () => {
+    rememberModalTrigger();
+    setIsAddModalOpen(true);
+  };
+
+  const closeAddWasteModal = () => {
+    setIsAddModalOpen(false);
+    restoreModalTrigger();
+  };
+
   const handleIdentifyResult = (res: WasteItem & { source?: 'local' | 'user' }, transcript?: string) => {
     setResult(res);
     setNotFoundQuery(null);
@@ -223,7 +233,7 @@ const App: React.FC = () => {
 
   const handleAddMissingItem = () => {
     setQuery(notFoundQuery || query);
-    setIsAddModalOpen(true);
+    openAddWasteModal();
   };
 
   const handleSuggestionCancel = () => {
@@ -282,7 +292,7 @@ const App: React.FC = () => {
         {/* Add to database button */}
         {!result && !loading && (
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={openAddWasteModal}
             className="w-full mb-6 py-4 rounded-[25px] border-4 border-dashed border-emerald-300 text-emerald-600 font-bold text-lg hover:bg-emerald-50 transition-all flex items-center justify-center gap-2"
           >
             <span className="text-2xl">+</span> Přidat vlastní odpad do databáze
@@ -421,7 +431,7 @@ const App: React.FC = () => {
 
       <AddWasteModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={closeAddWasteModal}
         onAdd={handleAddUserItem}
       />
 

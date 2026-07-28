@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../App';
 import SearchBox from '../components/ui/SearchBox';
 import SuggestionList from '../components/waste/SuggestionList';
 import UpdatePrompt from '../components/ui/UpdatePrompt';
+import CalendarModal from '../components/schedule/CalendarModal';
+import CollectionAlert from '../components/schedule/CollectionAlert';
+import AddWasteModal from '../components/waste/AddWasteModal';
+import { WasteCategory } from '../../types';
 
 describe('component smoke', () => {
   beforeEach(() => {
@@ -15,6 +19,26 @@ describe('component smoke', () => {
       removeEventListener: vi.fn(),
     }));
   });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const stubNotification = (permission: NotificationPermission) => {
+    const requestPermission = vi.fn();
+    const notification = vi.fn();
+    Object.defineProperty(notification, 'permission', {
+      value: permission,
+      configurable: true,
+    });
+    Object.defineProperty(notification, 'requestPermission', {
+      value: requestPermission,
+      configurable: true,
+    });
+    vi.stubGlobal('Notification', notification);
+    return { notification, requestPermission };
+  };
 
   it('does not submit an empty query', () => {
     const onSearch = vi.fn();
@@ -77,5 +101,99 @@ describe('component smoke', () => {
     render(<UpdatePrompt onUpdate={() => undefined} onDismiss={onDismiss} />);
     fireEvent.click(screen.getByRole('button', { name: /pozd/i }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounting CollectionAlert never requests notification permission', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00+01:00'));
+    const { requestPermission } = stubNotification('default');
+
+    render(<CollectionAlert />);
+
+    expect(requestPermission).not.toHaveBeenCalled();
+  });
+
+  it('CollectionAlert can show a notification when permission is already granted', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00+01:00'));
+    const { notification } = stubNotification('granted');
+
+    render(<CollectionAlert />);
+
+    expect(notification).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes accessible calendar controls', () => {
+    const onClose = vi.fn();
+    render(<CalendarModal isOpen onClose={onClose} />);
+
+    expect(screen.getByRole('dialog', { name: /kalendář svozů/i })).toBeTruthy();
+    const heading = screen.getByRole('heading', { name: /kalendář svozů/i });
+    expect(heading.getAttribute('id')).toBe('collection-calendar-title');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Další měsíc' }));
+    expect(screen.getByText(/srpen/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Předchozí měsíc' }));
+    expect(screen.getByText(/červenec/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zavřít kalendář' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Escape closing the calendar', () => {
+    const onClose = vi.fn();
+    render(<CalendarModal isOpen onClose={onClose} />);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels AddWasteModal fields and keeps submit working', () => {
+    const onAdd = vi.fn();
+    const onClose = vi.fn();
+    render(<AddWasteModal isOpen onAdd={onAdd} onClose={onClose} />);
+
+    expect(screen.getByRole('dialog', { name: /přidat do databáze/i })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/název odpadu/i), { target: { value: 'Auditní kelímek' } });
+    fireEvent.change(screen.getByLabelText(/kategorie/i), { target: { value: WasteCategory.PLAST } });
+    fireEvent.change(screen.getByLabelText(/poznámka/i), { target: { value: 'Čistý obal' } });
+    expect(screen.getByRole('button', { name: /navrhnout kategorii offline/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /^přidat$/i }));
+
+    expect(onAdd).toHaveBeenCalledWith({
+      name: 'Auditní kelímek',
+      category: WasteCategory.PLAST,
+      note: 'Čistý obal',
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses AddWaste name input and restores focus after Escape', async () => {
+    render(<App />);
+    const openButton = screen.getByRole('button', { name: /přidat vlastní odpad do databáze/i });
+
+    openButton.focus();
+    fireEvent.click(openButton);
+
+    const nameInput = screen.getByLabelText(/název odpadu/i);
+    await waitFor(() => expect(document.activeElement).toBe(nameInput));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(document.activeElement).toBe(openButton));
+  });
+
+  it('restores focus after cancelling AddWasteModal', async () => {
+    render(<App />);
+    const openButton = screen.getByRole('button', { name: /přidat vlastní odpad do databáze/i });
+
+    openButton.focus();
+    fireEvent.click(openButton);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/název odpadu/i)));
+    fireEvent.click(screen.getByRole('button', { name: /zrušit/i }));
+
+    await waitFor(() => expect(document.activeElement).toBe(openButton));
   });
 });
