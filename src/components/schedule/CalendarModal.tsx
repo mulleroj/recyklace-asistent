@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { WASTE_SCHEDULE, getTypeLabel, hasScheduleEntriesForYear } from '../../../wasteSchedule';
+import ScheduleEditorModal from './ScheduleEditorModal';
 
 interface CalendarModalProps {
     isOpen: boolean;
@@ -17,15 +18,22 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
+    const editorTriggerRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!isOpen || isEditorOpen) return;
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') onClose();
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, onClose]);
+    }, [isOpen, isEditorOpen, onClose]);
+
+    const closeEditor = () => {
+        setIsEditorOpen(false);
+        editorTriggerRef.current?.focus();
+    };
 
     if (!isOpen) return null;
 
@@ -236,8 +244,24 @@ const CalendarModal: React.FC<CalendarModalProps> = ({ isOpen, onClose }) => {
                             <p className="text-xs font-bold uppercase text-slate-400 mb-2">Svozy tento měsíc: {monthCollections.length}</p>
                         </div>
                     )}
+
+                    {/* Next-year preparation entry point */}
+                    <div className="mt-4 pt-4 border-t-2 border-slate-100">
+                        <p className="font-bold text-slate-700 text-sm">Máte nový rozpis svozů?</p>
+                        <p className="text-sm text-slate-500 mb-2">Připravte z něj soubor pro aktualizaci aplikace.</p>
+                        <button
+                            type="button"
+                            ref={editorTriggerRef}
+                            onClick={() => setIsEditorOpen(true)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-3 rounded-xl transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                        >
+                            Připravit kalendář pro další rok
+                        </button>
+                    </div>
                 </div>
             </div>
+
+            <ScheduleEditorModal isOpen={isEditorOpen} onClose={closeEditor} />
         </div>
     );
 };

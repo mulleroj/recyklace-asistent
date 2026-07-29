@@ -5,7 +5,10 @@ export interface ScheduleEntry {
   types: string[];
 }
 
-const ALLOWED_SCHEDULE_TYPES = new Set(['plast', 'papir', 'sklo', 'bio', 'smesny']);
+export const SCHEDULE_TYPE_CODES = ['smesny', 'plast', 'papir', 'sklo', 'bio'] as const;
+export type ScheduleTypeCode = (typeof SCHEDULE_TYPE_CODES)[number];
+
+const ALLOWED_SCHEDULE_TYPES = new Set<string>(SCHEDULE_TYPE_CODES);
 
 export const WASTE_SCHEDULE: ScheduleEntry[] = scheduleData.schedule;
 
