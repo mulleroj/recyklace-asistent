@@ -9,7 +9,7 @@ interface FeedbackButtonsProps {
 }
 
 const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
-    itemId,
+    itemId: _itemId,
     itemName,
     category,
     onFeedback,
@@ -91,9 +91,9 @@ const NegativeFeedbackForm: React.FC<{
         { value: WasteCategory.SKLO, label: 'Zelená: Sklo' },
         { value: WasteCategory.KOVY, label: 'Šedá: Kovy' },
         { value: WasteCategory.BIO, label: 'Hnědá: Bioodpad' },
-        { value: WasteCategory.KOMUNALNI, label: 'Černá: Směsný odpad' },
+        { value: WasteCategory.SMESNY, label: 'Černá: Směsný odpad' },
         { value: WasteCategory.SBERNY_DVUR, label: 'Sběrný dvůr' },
-        { value: WasteCategory.NEBEZPECNY, label: 'Nebezpečný odpad' },
+        { value: WasteCategory.SBERNY_DVUR, label: 'Nebezpečný odpad' },
     ];
 
     return (

@@ -1,5 +1,5 @@
 // Test cases for enhanced fuzzy search
-import { findLocalMatch, getLevenshteinDistance } from './fuzzySearch';
+import { findLocalMatch } from './fuzzySearch';
 
 // Mock database for testing
 const testDatabase = [

@@ -35,7 +35,7 @@ const CollectionAlert: React.FC<CollectionAlertProps> = ({ compact = false }) =>
                 if (days <= 2 && days >= 0) {
                     setShowNotification(true);
 
-                    // Request browser notification permission and show notification
+                    // Show browser notification only after permission was granted elsewhere.
                     if ('Notification' in window && Notification.permission === 'granted') {
                         new Notification('🗑️ Svoz odpadu', {
                             body: `Za ${days} ${days === 1 ? 'den' : 'dny'}: ${next.types.map(getTypeLabel).join(', ')}`,
@@ -51,11 +51,6 @@ const CollectionAlert: React.FC<CollectionAlertProps> = ({ compact = false }) =>
 
         // Update every hour
         const interval = setInterval(updateSchedule, 60 * 60 * 1000);
-
-        // Request notification permission
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
 
         return () => clearInterval(interval);
     }, []);

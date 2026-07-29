@@ -1,9 +1,7 @@
-
 {
-  "name": "Recyklační Asistent",
-  "description": "Specializovaný AI agent pro rychlé a efektivní třídění domácího odpadu podle českých standardů.",
+  "name": "Recyklacni Asistent",
+  "description": "Lokalni PWA pomocnik pro rychle a efektivni trideni domaciho odpadu podle ceskych standardu.",
   "requestFramePermissions": [
-    "camera",
     "microphone"
   ]
 }

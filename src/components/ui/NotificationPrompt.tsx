@@ -30,7 +30,7 @@ const NotificationPrompt: React.FC<NotificationPromptProps> = ({ onClose }) => {
                     // Try to register periodic sync
                     if ('periodicSync' in registration) {
                         try {
-                            // @ts-ignore - periodicSync is not in all TypeScript definitions
+                            // @ts-expect-error - periodicSync is not in all TypeScript definitions
                             await registration.periodicSync.register('check-waste-collection', {
                                 minInterval: 24 * 60 * 60 * 1000, // 24 hours
                             });

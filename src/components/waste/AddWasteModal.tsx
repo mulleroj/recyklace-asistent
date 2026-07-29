@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { WasteCategory } from '../../../types';
 import { WASTE_DATABASE } from '../../../constants';
 import { findLocalMatch } from '../../../utils/fuzzySearch';
@@ -65,6 +65,8 @@ const normalize = (str: string) =>
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
 
+const cleanInput = (value: string) => value.replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ');
+
 // Heuristické doplnění kategorie na základě klíčových slov
 function suggestCategoryFromKeywords(name: string): { category: WasteCategory; note: string } | null {
     const normalizedName = normalize(name);
@@ -98,6 +100,21 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
     const [category, setCategory] = useState<WasteCategory>(WasteCategory.SMESNY);
     const [note, setNote] = useState('');
     const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
+    const nameInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const focusTimer = window.setTimeout(() => nameInputRef.current?.focus(), 0);
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.clearTimeout(focusTimer);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen, onClose]);
 
     const handleSuggest = () => {
         if (!name.trim()) {
@@ -118,42 +135,60 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name.trim()) return;
+        const normalizedName = cleanInput(name);
+        const normalizedNote = cleanInput(note);
+        if (normalizedName.length < 2) {
+            setFormError('Zadejte nazev odpadu.');
+            return;
+        }
+        if (normalizedName.length > 80) {
+            setFormError('Nazev je prilis dlouhy.');
+            return;
+        }
 
         onAdd({
-            name: name.trim(),
+            name: normalizedName,
             category,
-            note: note.trim()
+            note: normalizedNote.slice(0, 400)
         });
 
         setName('');
         setCategory(WasteCategory.SMESNY);
         setNote('');
         setSuggestionMessage(null);
+        setFormError(null);
         onClose();
     };
 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-waste-title"
+        >
             <div className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
-                <h2 className="text-2xl font-black uppercase italic text-slate-800 mb-6 text-center">
+                <h2 id="add-waste-title" className="text-2xl font-black uppercase italic text-slate-800 mb-6 text-center">
                     Přidat do databáze
                 </h2>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
-                        <label className="block text-sm font-bold text-slate-600 mb-2 uppercase">
+                        <label htmlFor="custom-waste-name" className="block text-sm font-bold text-slate-600 mb-2 uppercase">
                             Název odpadu *
                         </label>
                         <div className="flex gap-2">
                             <input
+                                id="custom-waste-name"
+                                ref={nameInputRef}
                                 type="text"
                                 value={name}
                                 onChange={(e) => {
                                     setName(e.target.value);
                                     setSuggestionMessage(null);
+                                    setFormError(null);
                                 }}
                                 placeholder="např. Krabice od pizzy"
                                 className="flex-1 px-6 py-4 rounded-2xl border-4 border-slate-200 text-lg font-bold focus:outline-none focus:border-emerald-400 transition-all"
@@ -163,6 +198,7 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
                                 type="button"
                                 onClick={handleSuggest}
                                 disabled={!name.trim()}
+                                aria-label="Navrhnout kategorii offline"
                                 className="px-4 py-4 rounded-2xl bg-emerald-500 text-white font-bold text-sm disabled:opacity-50 active:scale-95 transition-all flex items-center gap-2"
                                 title="Navrhnout kategorii (offline)"
                             >
@@ -177,17 +213,22 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
                                 {suggestionMessage}
                             </p>
                         )}
+                        {formError && (
+                            <p className="text-xs mt-2 font-bold text-red-600" role="alert" aria-live="assertive">
+                                {formError}
+                            </p>
+                        )}
                     </div>
 
                     <div>
-                        <label className="block text-sm font-bold text-slate-600 mb-2 uppercase">
+                        <label htmlFor="custom-waste-category" className="block text-sm font-bold text-slate-600 mb-2 uppercase">
                             Kategorie *
                         </label>
                         <select
+                            id="custom-waste-category"
                             value={category}
                             onChange={(e) => setCategory(e.target.value as WasteCategory)}
                             className="w-full px-6 py-4 rounded-2xl border-4 border-slate-200 text-lg font-bold focus:outline-none focus:border-emerald-400 transition-all bg-white"
-                            aria-label="Vyberte kategorii odpadu"
                         >
                             {CATEGORY_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -198,10 +239,11 @@ const AddWasteModal: React.FC<AddWasteModalProps> = ({ isOpen, onClose, onAdd })
                     </div>
 
                     <div>
-                        <label className="block text-sm font-bold text-slate-600 mb-2 uppercase">
+                        <label htmlFor="custom-waste-note" className="block text-sm font-bold text-slate-600 mb-2 uppercase">
                             Poznámka (volitelné)
                         </label>
                         <textarea
+                            id="custom-waste-note"
                             value={note}
                             onChange={(e) => setNote(e.target.value)}
                             placeholder="Jak správně třídit, tipy..."
