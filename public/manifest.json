@@ -1,7 +1,7 @@
 {
-  "name": "Recyklacni asistent Povrly",
-  "short_name": "Tridic",
-  "description": "Jednoduchy pomocnik pro trideni odpadu a svozovy kalendar v obci Povrly.",
+  "name": "Recyklační asistent Povrly",
+  "short_name": "Třídič",
+  "description": "Jednoduchý pomocník pro třídění odpadu a svozový kalendář v obci Povrly.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
